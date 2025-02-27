@@ -1,6 +1,61 @@
 {
   "resources": {
+    "salvage_cm": {
+      "action": "salvage",
+      "resource": "cm",
+      "target": 700,
+      "createdAt": "2025-02-27T11:46:59.082Z",
+      "createdBy": "615971782293192714"
+    },
+    "mine_gold": {
+      "action": "mine",
+      "resource": "gold",
+      "target": 150,
+      "createdAt": "2025-02-27T11:50:59.010Z",
+      "createdBy": "615971782293192714"
+    },
+    "salvage_rmc": {
+      "action": "salvage",
+      "resource": "rmc",
+      "target": 4400,
+      "createdAt": "2025-02-27T12:08:03.343Z",
+      "createdBy": "253598351193407489"
+    },
+    "haul_iron": {
+      "action": "haul",
+      "resource": "iron",
+      "target": 39400,
+      "createdAt": "2025-02-27T12:10:36.533Z",
+      "createdBy": "253598351193407489"
+    },
+    "haul_copper": {
+      "action": "haul",
+      "resource": "copper",
+      "target": 39400,
+      "createdAt": "2025-02-27T12:11:13.908Z",
+      "createdBy": "253598351193407489"
+    }
   },
   "progress": {
+    "salvage_cm": {
+      "current": 0,
+      "contributions": []
+    },
+    "mine_gold": {
+      "current": 0,
+      "contributions": []
+    },
+    "salvage_rmc": {
+      "current": 0,
+      "contributions": []
+    },
+    "haul_iron": {
+      "current": 0,
+      "contributions": []
+    },
+    "haul_copper": {
+      "current": 0,
+      "contributions": []
+    }
   }
 }

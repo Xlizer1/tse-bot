@@ -41,10 +41,6 @@
     {
       "name": "Scrap Metal",
       "value": "scrap_metal"
-    },
-    {
-      "name": "Ship Parts",
-      "value": "ship_parts"
     }
   ],
   "haul": [
@@ -79,10 +75,6 @@
     {
       "name": "Hydrogen",
       "value": "hydrogen"
-    },
-    {
-      "name": "Chlorine",
-      "value": "chlorine"
     },
     {
       "name": "Diamonds",

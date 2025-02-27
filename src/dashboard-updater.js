@@ -1,180 +1,162 @@
-const fs = require('fs');
-const path = require('path');
-const { createProgressEmbed } = require('./commands/livedashboard');
+const { EmbedBuilder } = require("discord.js");
+const TargetModel = require("./models/target");
+const ContributionModel = require("./models/contribution");
+const { DashboardModel } = require("./models/dashboard");
 
-// Path to settings and targets data
-const settingsPath = path.join(__dirname, 'data', 'settings.json');
-const targetsPath = path.join(__dirname, 'data', 'targets.json');
+// Create a progress embed based on targets
+async function createProgressEmbed() {
+  const embed = new EmbedBuilder()
+    .setColor(0x0099ff)
+    .setTitle("Resource Collection Progress")
+    .setDescription("Current progress towards resource targets")
+    .setTimestamp();
+
+  try {
+    // Get all targets with progress
+    const targets = await TargetModel.getAllWithProgress();
+
+    // Check if there are any targets
+    if (targets.length === 0) {
+      embed.setDescription(
+        "No resource targets have been set yet. Ask an admin to set targets using the /settarget command."
+      );
+      return embed;
+    }
+
+    // Add progress for each resource
+    for (const target of targets) {
+      const current = target.current_amount || 0;
+      const percentage = Math.floor((current / target.target_amount) * 100);
+
+      // Create progress bar
+      const barLength = 15;
+      const filledChars = Math.round((percentage / 100) * barLength);
+      const progressBar =
+        "█".repeat(filledChars) + "░".repeat(barLength - filledChars);
+
+      // Get last contributor if any
+      let lastContributor = "No contributions yet";
+
+      const latestContribution = await ContributionModel.getLatestForTarget(
+        target.id
+      );
+
+      if (latestContribution) {
+        const date = new Date(latestContribution.timestamp);
+        const timeString = date.toLocaleString();
+
+        lastContributor = `Last: ${latestContribution.username} added ${latestContribution.amount} SCU (${timeString})`;
+      }
+
+      // Capitalize resource and action names
+      const resourceName =
+        target.resource_name ||
+        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+      const actionName =
+        target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+      embed.addFields({
+        name: `${actionName} ${resourceName}`,
+        value: `${progressBar} ${current}/${target.target_amount} SCU (${percentage}%)\n${lastContributor}`,
+      });
+    }
+
+    return embed;
+  } catch (error) {
+    console.error("Error creating progress embed:", error);
+    embed.setDescription("An error occurred while loading progress data.");
+    return embed;
+  }
+}
 
 // Update all dashboards when resource data changes
 async function updateDashboards(client) {
+  try {
     try {
-        // Check if settings file exists
-        if (!fs.existsSync(settingsPath)) {
-            // Create a default settings file
-            fs.writeFileSync(settingsPath, JSON.stringify({ dashboards: [] }), 'utf8');
-            return;
-        }
-        
-        // Load settings with error handling
-        let settings;
+      // Get all dashboard records
+      const dashboards = await DashboardModel.getAll();
+
+      // Check if there are any dashboards
+      if (dashboards.length === 0) return;
+
+      // Create updated embed
+      const updatedEmbed = await createProgressEmbed();
+
+      // Update each dashboard
+      const validDashboards = [];
+
+      for (const dashboard of dashboards) {
+        const { guild_id, channel_id, message_id } = dashboard;
+
         try {
-            const rawData = fs.readFileSync(settingsPath, 'utf8');
-            // Handle empty file case
-            if (!rawData || rawData.trim() === '') {
-                settings = { dashboards: [] };
-                fs.writeFileSync(settingsPath, JSON.stringify(settings), 'utf8');
-            } else {
-                settings = JSON.parse(rawData);
-            }
-        } catch (parseError) {
-            console.error('Error parsing settings file, creating a new one:', parseError);
-            settings = { dashboards: [] };
-            fs.writeFileSync(settingsPath, JSON.stringify(settings), 'utf8');
-            return;
+          // Get guild
+          const guild = client.guilds.cache.get(guild_id);
+          if (!guild) continue;
+
+          // Get channel
+          const channel = guild.channels.cache.get(channel_id);
+          if (!channel) continue;
+
+          // Get message
+          const message = await channel.messages
+            .fetch(message_id)
+            .catch(() => null);
+          if (!message) {
+            // Remove invalid dashboard
+            await DashboardModel.remove(message_id);
+            continue;
+          }
+
+          // Update the message
+          await message.edit({ embeds: [updatedEmbed] });
+
+          // This dashboard is valid, keep it
+          validDashboards.push(dashboard);
+        } catch (error) {
+          console.error(`Error updating dashboard ${message_id}:`, error);
+          // Remove problematic dashboard
+          await DashboardModel.remove(message_id);
         }
-        
-        // Ensure dashboards array exists
-        if (!settings.dashboards || !Array.isArray(settings.dashboards)) {
-            settings.dashboards = [];
-            fs.writeFileSync(settingsPath, JSON.stringify(settings), 'utf8');
-            return;
-        }
-        
-        // Check if there are any dashboards
-        if (settings.dashboards.length === 0) return;
-        
-        // Load targets data
-        if (!fs.existsSync(targetsPath)) {
-            fs.writeFileSync(targetsPath, JSON.stringify({
-                resources: {},
-                progress: {}
-            }), 'utf8');
-            return;
-        }
-        
-        // Load targets data with error handling
-        let targetsData;
-        try {
-            const rawTargetsData = fs.readFileSync(targetsPath, 'utf8');
-            
-            if (!rawTargetsData || rawTargetsData.trim() === '') {
-                targetsData = {
-                    resources: {},
-                    progress: {}
-                };
-                fs.writeFileSync(targetsPath, JSON.stringify(targetsData), 'utf8');
-            } else {
-                targetsData = JSON.parse(rawTargetsData);
-            }
-        } catch (parseError) {
-            console.error('Error parsing targets file, creating a new one:', parseError);
-            targetsData = {
-                resources: {},
-                progress: {}
-            };
-            fs.writeFileSync(targetsPath, JSON.stringify(targetsData), 'utf8');
-            return;
-        }
-        
-        // Create updated embed
-        const updatedEmbed = createProgressEmbed(targetsData);
-        
-        // Update each dashboard
-        const validDashboards = [];
-        
-        for (const dashboard of settings.dashboards) {
-            const { guildId, channelId, messageId } = dashboard;
-            
-            try {
-                // Get guild
-                const guild = client.guilds.cache.get(guildId);
-                if (!guild) continue;
-                
-                // Get channel
-                const channel = guild.channels.cache.get(channelId);
-                if (!channel) continue;
-                
-                // Get message
-                const message = await channel.messages.fetch(messageId).catch(() => null);
-                if (!message) continue;
-                
-                // Update the message
-                await message.edit({ embeds: [updatedEmbed] });
-                
-                // This dashboard is valid, keep it
-                validDashboards.push(dashboard);
-            } catch (error) {
-                console.error(`Error updating dashboard ${messageId}:`, error);
-                // Don't add to validDashboards to remove problematic ones
-            }
-        }
-        
-        // Update the settings with only valid dashboards
-        if (validDashboards.length !== settings.dashboards.length) {
-            settings.dashboards = validDashboards;
-            fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
-            console.log(`Updated dashboards list, removed ${settings.dashboards.length - validDashboards.length} invalid dashboards`);
-        }
+      }
     } catch (error) {
-        console.error('Error in updateDashboards:', error);
+      if (error.code === "ER_NO_SUCH_TABLE") {
+        console.log(
+          "Dashboards table not found. This will be created during database initialization."
+        );
+        return; // Exit the function without throwing an error
+      }
+      throw error; // Rethrow other errors
     }
+  } catch (error) {
+    console.error("Error in updateDashboards:", error);
+  }
 }
 
 // Handle dashboard refresh button
 async function handleRefreshDashboard(interaction) {
-    try {
-        // Ensure targets file exists
-        if (!fs.existsSync(targetsPath)) {
-            fs.writeFileSync(targetsPath, JSON.stringify({
-                resources: {},
-                progress: {}
-            }), 'utf8');
-        }
-        
-        // Load targets data with error handling
-        let targetsData;
-        try {
-            const rawData = fs.readFileSync(targetsPath, 'utf8');
-            
-            if (!rawData || rawData.trim() === '') {
-                targetsData = {
-                    resources: {},
-                    progress: {}
-                };
-                fs.writeFileSync(targetsPath, JSON.stringify(targetsData), 'utf8');
-            } else {
-                targetsData = JSON.parse(rawData);
-            }
-        } catch (parseError) {
-            console.error('Error parsing targets file:', parseError);
-            targetsData = {
-                resources: {},
-                progress: {}
-            };
-        }
-        
-        // Create updated embed
-        const updatedEmbed = createProgressEmbed(targetsData);
-        
-        // Update the message
-        await interaction.message.edit({ embeds: [updatedEmbed] });
-        
-        // Acknowledge the interaction
-        await interaction.reply({ 
-            content: 'Dashboard refreshed!', 
-            ephemeral: true 
-        });
-    } catch (error) {
-        console.error('Error in handleRefreshDashboard:', error);
-        await interaction.reply({ 
-            content: 'An error occurred while refreshing the dashboard.', 
-            ephemeral: true 
-        });
-    }
+  try {
+    // Create updated embed
+    const updatedEmbed = await createProgressEmbed();
+
+    // Update the message
+    await interaction.message.edit({ embeds: [updatedEmbed] });
+
+    // Acknowledge the interaction
+    await interaction.reply({
+      content: "Dashboard refreshed!",
+      ephemeral: true,
+    });
+  } catch (error) {
+    console.error("Error in handleRefreshDashboard:", error);
+    await interaction.reply({
+      content: "An error occurred while refreshing the dashboard.",
+      ephemeral: true,
+    });
+  }
 }
 
 module.exports = {
-    updateDashboards,
-    handleRefreshDashboard
+  updateDashboards,
+  handleRefreshDashboard,
+  createProgressEmbed,
 };

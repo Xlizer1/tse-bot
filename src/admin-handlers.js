@@ -99,7 +99,8 @@ function ensureFilesExist() {
 async function handleAdminButtonInteraction(interaction) {
   // Verify admin permissions again
   if (!interaction.member.permissions.has("Administrator")) {
-    return interaction.reply({
+    await interaction.deferReply({ ephemeral: true });
+    return interaction.editReply({
       content: "You do not have permission to use admin controls.",
       ephemeral: true,
     });
@@ -1225,7 +1226,8 @@ async function handleAutoReportButton(interaction) {
 async function handleAdminSelectMenuInteraction(interaction) {
   // Verify admin permissions again
   if (!interaction.member.permissions.has("Administrator")) {
-    return interaction.reply({
+    await interaction.deferReply({ ephemeral: true });
+    return interaction.editReply({
       content: "You do not have permission to use admin controls.",
       ephemeral: true,
     });
@@ -1633,12 +1635,14 @@ async function handleAddTargetResourceSelect(interaction, resourceValue) {
   // Show the modal
   await interaction.showModal(modal);
 }
+// This should replace the existing code in the handleAdminModalSubmit function
+// in src/admin-handlers.js for handling target creation modals
 
-// Handle modal submissions for admin functions
 async function handleAdminModalSubmit(interaction) {
   // Verify admin permissions again
   if (!interaction.member.permissions.has("Administrator")) {
-    return interaction.reply({
+    await interaction.deferReply({ ephemeral: true });
+    return interaction.editReply({
       content: "You do not have permission to use admin controls.",
       ephemeral: true,
     });
@@ -1679,8 +1683,10 @@ async function handleAdminModalSubmit(interaction) {
         "utf8"
       );
 
+      await interaction.deferReply({ ephemeral: true });
+
       // Success message
-      await interaction.reply({
+      await interaction.editReply({
         content: `Successfully added ${name} (${value}) to ${actionType} resources.`,
         ephemeral: true,
         components: [
@@ -1699,7 +1705,9 @@ async function handleAdminModalSubmit(interaction) {
     } catch (error) {
       console.error("Error adding resource:", error);
 
-      await interaction.reply({
+      await interaction.deferReply({ ephemeral: true });
+
+      await interaction.editReply({
         content: `Error adding resource: ${error.message}`,
         ephemeral: true,
         components: [
@@ -1719,6 +1727,9 @@ async function handleAdminModalSubmit(interaction) {
       interaction.fields.getTextInputValue("target_amount")
     );
 
+    // First, acknowledge the interaction to prevent timeout
+    await interaction.deferReply({ ephemeral: true });
+
     // Get action type from message content
     const content = interaction.message.content;
     const actionMatch = content.match(
@@ -1726,9 +1737,8 @@ async function handleAdminModalSubmit(interaction) {
     );
 
     if (!actionMatch) {
-      return interaction.reply({
+      return interaction.editReply({
         content: "Error: Could not determine action type",
-        ephemeral: true,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1796,9 +1806,8 @@ async function handleAdminModalSubmit(interaction) {
       await updateDashboards(interaction.client);
 
       // Success message
-      await interaction.reply({
+      await interaction.editReply({
         content: `Successfully set target: ${action} ${amount} SCU of ${resourceInfo.name}`,
-        ephemeral: true,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1815,9 +1824,8 @@ async function handleAdminModalSubmit(interaction) {
     } catch (error) {
       console.error("Error adding target:", error);
 
-      await interaction.reply({
+      await interaction.editReply({
         content: `Error adding target: ${error.message}`,
-        ephemeral: true,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1857,7 +1865,8 @@ async function handleAdminModalSubmit(interaction) {
         options,
         deferReply: async () => {},
         editReply: async (data) => {
-          await interaction.reply({
+          await interaction.deferReply({ ephemeral: true });
+          await interaction.editReply({
             content: "Dashboard created successfully!",
             ephemeral: true,
             components: [
@@ -1881,7 +1890,8 @@ async function handleAdminModalSubmit(interaction) {
     } catch (error) {
       console.error("Error creating dashboard:", error);
 
-      await interaction.reply({
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.editReply({
         content: `Error creating dashboard: ${error.message}`,
         ephemeral: true,
         components: [
@@ -1908,7 +1918,8 @@ async function handleAdminModalSubmit(interaction) {
     // Validate time format (24h: HH:MM)
     const timeRegex = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
     if (!timeRegex.test(time)) {
-      return interaction.reply({
+        await interaction.deferReply({ ephemeral: true });
+      return interaction.editReply({
         content:
           "Invalid time format. Please use 24h format (e.g., 08:00 or 20:30).",
         ephemeral: true,
@@ -1948,9 +1959,11 @@ async function handleAdminModalSubmit(interaction) {
 
       // Save settings
       fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+      
+      await interaction.deferReply({ ephemeral: true });
 
       // Success message
-      await interaction.reply({
+      await interaction.editReply({
         content: `Auto reports ${enabled ? "enabled" : "disabled"}. ${
           enabled
             ? `Reports will be posted in <#${channelId}> at ${time} UTC.`
@@ -1973,7 +1986,8 @@ async function handleAdminModalSubmit(interaction) {
     } catch (error) {
       console.error("Error configuring auto reports:", error);
 
-      await interaction.reply({
+      await interaction.deferReply({ ephemeral: true });
+      await interaction.editReply({
         content: `Error configuring auto reports: ${error.message}`,
         ephemeral: true,
         components: [
