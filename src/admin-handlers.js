@@ -1,0 +1,1996 @@
+const {
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  StringSelectMenuBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
+  AttachmentBuilder,
+} = require("discord.js");
+const fs = require("fs");
+const path = require("path");
+const ExcelJS = require("exceljs");
+
+// Path to store targets data
+const targetsPath = path.join(__dirname, "data", "targets.json");
+// Path to store resource definitions
+const resourcesPath = path.join(__dirname, "data", "resources.json");
+// Path to store settings
+const settingsPath = path.join(__dirname, "data", "settings.json");
+
+// Import updateDashboards directly to avoid circular dependency
+const { updateDashboards } = require("./dashboard-updater");
+
+// Ensure files exist
+function ensureFilesExist() {
+  // Ensure data directory exists
+  const dataDir = path.join(__dirname, "data");
+  if (!fs.existsSync(dataDir)) {
+    fs.mkdirSync(dataDir, { recursive: true });
+  }
+
+  // Ensure targets file exists
+  if (!fs.existsSync(targetsPath)) {
+    fs.writeFileSync(
+      targetsPath,
+      JSON.stringify({
+        resources: {},
+        progress: {},
+      }),
+      "utf8"
+    );
+  }
+
+  // Ensure resources file exists
+  if (!fs.existsSync(resourcesPath)) {
+    // Default resources list
+    const defaultResources = {
+      mining: [
+        { name: "Copper", value: "copper" },
+        { name: "Iron", value: "iron" },
+        { name: "Gold", value: "gold" },
+        { name: "Diamond", value: "diamond" },
+        { name: "Quantainium", value: "quantainium" },
+        { name: "Titanium", value: "titanium" },
+        { name: "Aluminum", value: "aluminum" },
+      ],
+      salvage: [
+        { name: "RMC", value: "rmc" },
+        { name: "CM", value: "cm" },
+        { name: "Scrap Metal", value: "scrap_metal" },
+        { name: "Ship Parts", value: "ship_parts" },
+      ],
+      haul: [
+        { name: "Iron", value: "iron" },
+        { name: "Copper", value: "copper" },
+        { name: "Medical Supplies", value: "medical_supplies" },
+        { name: "Agricultural Supplies", value: "agricultural_supplies" },
+        { name: "Titanium", value: "titanium" },
+        { name: "Hydrogen", value: "hydrogen" },
+        { name: "Chlorine", value: "chlorine" },
+      ],
+    };
+
+    fs.writeFileSync(
+      resourcesPath,
+      JSON.stringify(defaultResources, null, 2),
+      "utf8"
+    );
+  }
+
+  // Ensure settings file exists
+  if (!fs.existsSync(settingsPath)) {
+    fs.writeFileSync(
+      settingsPath,
+      JSON.stringify({
+        dashboards: [],
+        autoReport: {
+          enabled: false,
+        },
+      }),
+      "utf8"
+    );
+  }
+}
+
+// Handle admin dashboard button interactions
+async function handleAdminButtonInteraction(interaction) {
+  // Verify admin permissions again
+  if (!interaction.member.permissions.has("Administrator")) {
+    return interaction.reply({
+      content: "You do not have permission to use admin controls.",
+      ephemeral: true,
+    });
+  }
+
+  // Get the button ID that was clicked
+  const buttonId = interaction.customId;
+
+  // Ensure files exist
+  ensureFilesExist();
+
+  switch (buttonId) {
+    case "admin_resources":
+      await handleResourcesButton(interaction);
+      break;
+    case "admin_targets":
+      await handleTargetsButton(interaction);
+      break;
+    case "admin_export":
+      await handleExportButton(interaction);
+      break;
+    case "admin_display":
+      await handleDisplayButton(interaction);
+      break;
+    case "admin_stats":
+      await handleStatsButton(interaction);
+      break;
+    case "admin_back":
+      await handleBackButton(interaction);
+      break;
+    case "admin_add_resource":
+      await handleAddResourceButton(interaction);
+      break;
+    case "admin_remove_resource":
+      await handleRemoveResourceButton(interaction);
+      break;
+    case "admin_add_target":
+      await handleAddTargetButton(interaction);
+      break;
+    case "admin_reset_target":
+      await handleResetTargetButton(interaction);
+      break;
+    case "admin_reset_progress":
+      await handleResetProgressButton(interaction);
+      break;
+    case "admin_create_dashboard":
+      await handleCreateDashboardButton(interaction);
+      break;
+    case "admin_auto_report":
+      await handleAutoReportButton(interaction);
+      break;
+  }
+}
+
+// Resource Management
+async function handleResourcesButton(interaction) {
+  // Load resources
+  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+
+  // Create resources embed
+  const resourcesEmbed = new EmbedBuilder()
+    .setColor(0x0099ff)
+    .setTitle("Resource Management")
+    .setDescription(
+      "Manage resources for mining, salvage, and hauling operations"
+    )
+    .setTimestamp();
+
+  // Add mining resources
+  let miningText = "";
+  if (resources.mining && resources.mining.length > 0) {
+    miningText = resources.mining
+      .map((r) => `• ${r.name} (${r.value})`)
+      .join("\n");
+  } else {
+    miningText = "No mining resources defined";
+  }
+  resourcesEmbed.addFields({ name: "Mining Resources", value: miningText });
+
+  // Add salvage resources
+  let salvageText = "";
+  if (resources.salvage && resources.salvage.length > 0) {
+    salvageText = resources.salvage
+      .map((r) => `• ${r.name} (${r.value})`)
+      .join("\n");
+  } else {
+    salvageText = "No salvage resources defined";
+  }
+  resourcesEmbed.addFields({ name: "Salvage Resources", value: salvageText });
+
+  // Add haul resources
+  let haulText = "";
+  if (resources.haul && resources.haul.length > 0) {
+    haulText = resources.haul.map((r) => `• ${r.name} (${r.value})`).join("\n");
+  } else {
+    haulText = "No haul resources defined";
+  }
+  resourcesEmbed.addFields({ name: "Haul Resources", value: haulText });
+
+  // Create button row
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_add_resource")
+      .setLabel("Add Resource")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("admin_remove_resource")
+      .setLabel("Remove Resource")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Reply with the resources embed
+  await interaction.update({
+    embeds: [resourcesEmbed],
+    components: [row],
+  });
+}
+
+// Target Management
+async function handleTargetsButton(interaction) {
+  // Load targets data
+  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+
+  // Create targets embed
+  const targetsEmbed = new EmbedBuilder()
+    .setColor(0x0099ff)
+    .setTitle("Target Management")
+    .setDescription(
+      "Set collection targets or reset progress for specific resources"
+    )
+    .setTimestamp();
+
+  // Add targets and progress
+  if (Object.keys(targetsData.resources).length === 0) {
+    targetsEmbed.addFields({
+      name: "No Targets Set",
+      value: "Use the buttons below to add new targets",
+    });
+  } else {
+    Object.entries(targetsData.resources).forEach(([key, resourceData]) => {
+      const progress = targetsData.progress[key] || { current: 0 };
+      const percentage = Math.floor(
+        (progress.current / resourceData.target) * 100
+      );
+
+      const resourceName =
+        resourceData.resource.charAt(0).toUpperCase() +
+        resourceData.resource.slice(1);
+      const actionName =
+        resourceData.action.charAt(0).toUpperCase() +
+        resourceData.action.slice(1);
+
+      targetsEmbed.addFields({
+        name: `${actionName} ${resourceName}`,
+        value: `Target: ${resourceData.target} SCU\nCurrent: ${progress.current} SCU (${percentage}%)`,
+      });
+    });
+  }
+
+  // Create button row
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_add_target")
+      .setLabel("Add Target")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("admin_reset_target")
+      .setLabel("Remove Target")
+      .setStyle(ButtonStyle.Danger),
+    new ButtonBuilder()
+      .setCustomId("admin_reset_progress")
+      .setLabel("Reset Progress")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Reply with the targets embed
+  await interaction.update({
+    embeds: [targetsEmbed],
+    components: [row],
+  });
+}
+
+// Export data
+async function handleExportButton(interaction) {
+  await interaction.deferUpdate();
+
+  try {
+    // Load targets data
+    const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+
+    // Create a new workbook
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "Terra Star Expeditionary Bot";
+    workbook.created = new Date();
+
+    // Create Summary worksheet
+    const summarySheet = workbook.addWorksheet("Resource Summary");
+
+    // Add title to summary sheet
+    summarySheet.mergeCells("A1:E1");
+    const titleRow = summarySheet.getCell("A1");
+    titleRow.value = "Terra Star Expeditionary Resource Summary";
+    titleRow.font = {
+      size: 16,
+      bold: true,
+      color: { argb: "4F33FF" },
+    };
+    titleRow.alignment = { horizontal: "center" };
+
+    // Add current date
+    summarySheet.mergeCells("A2:E2");
+    const dateRow = summarySheet.getCell("A2");
+    dateRow.value = `Report generated on ${new Date().toLocaleString()}`;
+    dateRow.font = { italic: true };
+    dateRow.alignment = { horizontal: "center" };
+
+    // Add headers
+    summarySheet.addRow([]);
+    const summaryHeaders = summarySheet.addRow([
+      "Resource",
+      "Action",
+      "Target (SCU)",
+      "Current (SCU)",
+      "Progress",
+    ]);
+    summaryHeaders.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4472C4" },
+        bgColor: { argb: "4472C4" },
+      };
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+    });
+
+    // Format columns
+    summarySheet.getColumn("A").width = 20; // Resource
+    summarySheet.getColumn("B").width = 15; // Action
+    summarySheet.getColumn("C").width = 15; // Target
+    summarySheet.getColumn("D").width = 15; // Current
+    summarySheet.getColumn("E").width = 15; // Progress
+
+    // Add data rows
+    Object.entries(targetsData.resources).forEach(([key, resourceData]) => {
+      const progress = targetsData.progress[key] || { current: 0 };
+      const percentage = Math.floor(
+        (progress.current / resourceData.target) * 100
+      );
+
+      // Capitalize resource and action
+      const resourceName =
+        resourceData.resource.charAt(0).toUpperCase() +
+        resourceData.resource.slice(1);
+      const actionName =
+        resourceData.action.charAt(0).toUpperCase() +
+        resourceData.action.slice(1);
+
+      const row = summarySheet.addRow([
+        resourceName,
+        actionName,
+        resourceData.target,
+        progress.current,
+        `${percentage}%`,
+      ]);
+
+      // Add conditional formatting to progress column
+      const progressCell = row.getCell(5);
+      if (percentage >= 100) {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "92D050" }, // Green
+        };
+      } else if (percentage >= 70) {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFEB84" }, // Yellow
+        };
+      } else if (percentage >= 30) {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFC000" }, // Orange
+        };
+      } else {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF7676" }, // Red
+        };
+      }
+    });
+
+    // Add border to the table
+    const lastRowNum = summarySheet.rowCount;
+    summarySheet.getCell(`A4`).border = {
+      top: { style: "medium" },
+      left: { style: "medium" },
+    };
+    summarySheet.getCell(`E4`).border = {
+      top: { style: "medium" },
+      right: { style: "medium" },
+    };
+    summarySheet.getCell(`A${lastRowNum}`).border = {
+      bottom: { style: "medium" },
+      left: { style: "medium" },
+    };
+    summarySheet.getCell(`E${lastRowNum}`).border = {
+      bottom: { style: "medium" },
+      right: { style: "medium" },
+    };
+
+    // Create Details worksheet with all contribution data
+    const detailsSheet = workbook.addWorksheet("Detailed Contributions");
+
+    // Add title
+    detailsSheet.mergeCells("A1:F1");
+    const detailsTitle = detailsSheet.getCell("A1");
+    detailsTitle.value = "Detailed Resource Contributions";
+    detailsTitle.font = {
+      size: 16,
+      bold: true,
+      color: { argb: "4F33FF" },
+    };
+    detailsTitle.alignment = { horizontal: "center" };
+
+    // Add headers
+    detailsSheet.addRow([]);
+    const detailsHeaders = detailsSheet.addRow([
+      "Timestamp",
+      "User",
+      "Resource",
+      "Action",
+      "Amount (SCU)",
+      "Location",
+    ]);
+    detailsHeaders.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4472C4" },
+        bgColor: { argb: "4472C4" },
+      };
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+    });
+
+    // Format columns
+    detailsSheet.getColumn("A").width = 22; // Timestamp
+    detailsSheet.getColumn("B").width = 20; // User
+    detailsSheet.getColumn("C").width = 15; // Resource
+    detailsSheet.getColumn("D").width = 15; // Action
+    detailsSheet.getColumn("E").width = 15; // Amount
+    detailsSheet.getColumn("F").width = 30; // Location
+
+    // Collect all contributions
+    const allContributions = [];
+
+    Object.entries(targetsData.progress).forEach(([key, progressData]) => {
+      if (!progressData.contributions) return;
+
+      const [action, ...resourceParts] = key.split("_");
+      const resource = resourceParts.join("_");
+
+      progressData.contributions.forEach((contribution) => {
+        allContributions.push({
+          timestamp: new Date(contribution.timestamp),
+          username: contribution.username,
+          resource: resource.charAt(0).toUpperCase() + resource.slice(1),
+          action: action.charAt(0).toUpperCase() + action.slice(1),
+          amount: contribution.amount,
+          location: contribution.location,
+        });
+      });
+    });
+
+    // Sort contributions by timestamp (newest first)
+    allContributions.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Add contribution rows
+    allContributions.forEach((contribution) => {
+      const row = detailsSheet.addRow([
+        contribution.timestamp.toLocaleString(),
+        contribution.username,
+        contribution.resource,
+        contribution.action,
+        contribution.amount,
+        contribution.location,
+      ]);
+
+      // Alternate row coloring for readability
+      if (row.number % 2 === 0) {
+        row.eachCell((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "F2F2F2" },
+            bgColor: { argb: "F2F2F2" },
+          };
+        });
+      }
+    });
+
+    // Add user summary worksheet
+    const userSummarySheet = workbook.addWorksheet("User Summary");
+
+    // Add title
+    userSummarySheet.mergeCells("A1:C1");
+    const userTitle = userSummarySheet.getCell("A1");
+    userTitle.value = "User Contribution Summary";
+    userTitle.font = {
+      size: 16,
+      bold: true,
+      color: { argb: "4F33FF" },
+    };
+    userTitle.alignment = { horizontal: "center" };
+
+    // Add headers
+    userSummarySheet.addRow([]);
+    const userHeaders = userSummarySheet.addRow([
+      "User",
+      "Total Contributions (SCU)",
+      "Percentage of Total",
+    ]);
+    userHeaders.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4472C4" },
+        bgColor: { argb: "4472C4" },
+      };
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+    });
+
+    // Format columns
+    userSummarySheet.getColumn("A").width = 25; // User
+    userSummarySheet.getColumn("B").width = 25; // Total
+    userSummarySheet.getColumn("C").width = 25; // Percentage
+
+    // Calculate user totals
+    const userTotals = new Map();
+    let grandTotal = 0;
+
+    allContributions.forEach((contribution) => {
+      if (!userTotals.has(contribution.username)) {
+        userTotals.set(contribution.username, 0);
+      }
+      userTotals.set(
+        contribution.username,
+        userTotals.get(contribution.username) + contribution.amount
+      );
+      grandTotal += contribution.amount;
+    });
+
+    // Sort users by total contribution (highest first)
+    const sortedUsers = Array.from(userTotals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([username, total]) => ({
+        username,
+        total,
+        percentage: grandTotal > 0 ? (total / grandTotal) * 100 : 0,
+      }));
+
+    // Add user rows with special formatting for top contributors
+    sortedUsers.forEach((user, index) => {
+      const row = userSummarySheet.addRow([
+        user.username,
+        user.total,
+        `${user.percentage.toFixed(1)}%`,
+      ]);
+
+      // Highlight top 3 contributors
+      if (index < 3) {
+        row.eachCell((cell) => {
+          cell.font = { bold: true };
+          if (index === 0) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFD700" }, // Gold
+            };
+          } else if (index === 1) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "C0C0C0" }, // Silver
+            };
+          } else if (index === 2) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "CD7F32" }, // Bronze
+            };
+          }
+        });
+      }
+    });
+
+    // Save the workbook
+    const tempFile = path.join(__dirname, "data", "resource_export.xlsx");
+    await workbook.xlsx.writeFile(tempFile);
+
+    // Create attachment
+    const attachment = new AttachmentBuilder(tempFile, {
+      name: "TSE_Resource_Report.xlsx",
+    });
+
+    // Get back to main menu with export
+    // Create dashboard embed
+    const dashboardEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("TSE Admin Dashboard")
+      .setDescription(
+        "Export completed successfully! The file has been attached."
+      )
+      .addFields(
+        {
+          name: "Export Contents",
+          value:
+            "The export includes:\n- Resource summary\n- Detailed contributions\n- User leaderboard",
+        },
+        {
+          name: "Usage",
+          value:
+            "This spreadsheet can be opened in Excel, Google Sheets, or any other compatible application.",
+        }
+      )
+      .setFooter({ text: "Terra Star Expeditionary Admin Dashboard" })
+      .setTimestamp();
+
+    // Create button rows for main menu
+    const row1 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_resources")
+        .setLabel("Resource Management")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("admin_targets")
+        .setLabel("Target Management")
+        .setStyle(ButtonStyle.Primary)
+    );
+
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_export")
+        .setLabel("Export Data")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("admin_display")
+        .setLabel("Display Controls")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId("admin_stats")
+        .setLabel("System Stats")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Send the dashboard with attachment
+    await interaction.editReply({
+      embeds: [dashboardEmbed],
+      components: [row1, row2],
+      files: [attachment],
+    });
+
+    // Clean up temp file after a short delay
+    setTimeout(() => {
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (error) {
+        console.error("Error cleaning up temp file:", error);
+      }
+    }, 5000);
+  } catch (error) {
+    console.error("Export error:", error);
+
+    // Create error embed
+    const errorEmbed = new EmbedBuilder()
+      .setColor(0xff0000)
+      .setTitle("Export Error")
+      .setDescription(
+        "There was an error exporting the data. Please try again later."
+      )
+      .addFields({ name: "Error Details", value: error.message })
+      .setTimestamp();
+
+    // Back button
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.editReply({
+      embeds: [errorEmbed],
+      components: [row],
+    });
+  }
+}
+
+// Display controls
+async function handleDisplayButton(interaction) {
+  // Load settings
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+
+  // Create display embed
+  const displayEmbed = new EmbedBuilder()
+    .setColor(0x0099ff)
+    .setTitle("Display Controls")
+    .setDescription("Configure dashboards and reporting features")
+    .setTimestamp();
+
+  // Add dashboard info
+  const dashboards = settings.dashboards || [];
+  if (dashboards.length === 0) {
+    displayEmbed.addFields({
+      name: "Live Dashboards",
+      value: "No live dashboards currently active",
+    });
+  } else {
+    displayEmbed.addFields({
+      name: "Live Dashboards",
+      value: `${dashboards.length} active dashboard${
+        dashboards.length === 1 ? "" : "s"
+      }`,
+    });
+  }
+
+  // Add auto-report info
+  const autoReport = settings.autoReport || { enabled: false };
+  if (autoReport.enabled) {
+    displayEmbed.addFields({
+      name: "Auto Reports",
+      value: `Enabled - Daily reports at ${autoReport.time} UTC in <#${autoReport.channelId}>`,
+    });
+  } else {
+    displayEmbed.addFields({ name: "Auto Reports", value: "Disabled" });
+  }
+
+  // Create button row
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_create_dashboard")
+      .setLabel("Create Dashboard")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("admin_auto_report")
+      .setLabel(
+        autoReport.enabled ? "Update Auto Reports" : "Enable Auto Reports"
+      )
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Reply with the display embed
+  await interaction.update({
+    embeds: [displayEmbed],
+    components: [row],
+  });
+}
+
+// System stats
+async function handleStatsButton(interaction) {
+  // Load data
+  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+
+  // Calculate stats
+  const totalTargets = Object.keys(targetsData.resources).length;
+  let totalContributions = 0;
+  let totalAmount = 0;
+  const uniqueUsers = new Set();
+  let lastContribution = null;
+
+  // Process all contributions
+  Object.entries(targetsData.progress).forEach(([key, progressData]) => {
+    if (!progressData.contributions) return;
+
+    totalContributions += progressData.contributions.length;
+
+    progressData.contributions.forEach((contribution) => {
+      totalAmount += contribution.amount;
+      uniqueUsers.add(contribution.userId);
+
+      // Find latest contribution
+      if (
+        !lastContribution ||
+        new Date(contribution.timestamp) > new Date(lastContribution.timestamp)
+      ) {
+        lastContribution = contribution;
+      }
+    });
+  });
+
+  // Calculate resource counts
+  const resourceCounts = {
+    mining: resources.mining ? resources.mining.length : 0,
+    salvage: resources.salvage ? resources.salvage.length : 0,
+    haul: resources.haul ? resources.haul.length : 0,
+  };
+
+  // Create stats embed
+  const statsEmbed = new EmbedBuilder()
+    .setColor(0x0099ff)
+    .setTitle("System Statistics")
+    .setDescription("Current state of Terra Star Expeditionary Bot")
+    .addFields(
+      {
+        name: "Targets",
+        value: `${totalTargets} active targets`,
+        inline: true,
+      },
+      {
+        name: "Resources Defined",
+        value: `${
+          resourceCounts.mining + resourceCounts.salvage + resourceCounts.haul
+        } total resources`,
+        inline: true,
+      },
+      {
+        name: "Contributions",
+        value: `${totalContributions} logged contributions`,
+        inline: true,
+      },
+      {
+        name: "Total Amount",
+        value: `${totalAmount} SCU collected`,
+        inline: true,
+      },
+      {
+        name: "Unique Contributors",
+        value: `${uniqueUsers.size} unique users`,
+        inline: true,
+      },
+      {
+        name: "Live Dashboards",
+        value: `${settings.dashboards ? settings.dashboards.length : 0} active`,
+        inline: true,
+      }
+    )
+    .setTimestamp();
+
+  // Add latest contribution if exists
+  if (lastContribution) {
+    const timestamp = new Date(lastContribution.timestamp).toLocaleString();
+    statsEmbed.addFields({
+      name: "Latest Contribution",
+      value: `${lastContribution.username} added ${lastContribution.amount} SCU at ${timestamp}`,
+    });
+  }
+
+  // Create button row
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Reply with the stats embed
+  await interaction.update({
+    embeds: [statsEmbed],
+    components: [row],
+  });
+}
+
+// Back button handler
+async function handleBackButton(interaction) {
+  // Create dashboard embed
+  const dashboardEmbed = new EmbedBuilder()
+    .setColor(0x0099ff)
+    .setTitle("TSE Admin Dashboard")
+    .setDescription("Terra Star Expeditionary Bot Admin Controls")
+    .addFields(
+      {
+        name: "Resource Management",
+        value:
+          "Add, remove or view resources for mining, salvage, and hauling operations.",
+      },
+      {
+        name: "Target Management",
+        value:
+          "Set collection targets or reset progress for specific resources.",
+      },
+      {
+        name: "Data Export",
+        value: "Export resource collection data as an Excel spreadsheet.",
+      },
+      {
+        name: "Display Controls",
+        value: "Create or update dashboards and reporting features.",
+      },
+      {
+        name: "System Stats",
+        value: "View system statistics and status information.",
+      }
+    )
+    .setFooter({ text: "Terra Star Expeditionary Admin Dashboard" })
+    .setTimestamp();
+
+  // Create button rows
+  const row1 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_resources")
+      .setLabel("Resource Management")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("admin_targets")
+      .setLabel("Target Management")
+      .setStyle(ButtonStyle.Primary)
+  );
+
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_export")
+      .setLabel("Export Data")
+      .setStyle(ButtonStyle.Success),
+    new ButtonBuilder()
+      .setCustomId("admin_display")
+      .setLabel("Display Controls")
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId("admin_stats")
+      .setLabel("System Stats")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Send the dashboard
+  await interaction.update({
+    embeds: [dashboardEmbed],
+    components: [row1, row2],
+  });
+}
+
+// Add resource button handler
+async function handleAddResourceButton(interaction) {
+  // Create select menu for action type
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("admin_resource_action")
+      .setPlaceholder("Select action type")
+      .addOptions([
+        { label: "Mining Resource", value: "mining" },
+        { label: "Salvage Resource", value: "salvage" },
+        { label: "Hauling Resource", value: "haul" },
+      ])
+  );
+
+  // Update the message
+  await interaction.update({
+    content: "Select the action type for the new resource:",
+    embeds: [],
+    components: [row],
+  });
+}
+
+// Remove resource button handler
+async function handleRemoveResourceButton(interaction) {
+  // Load resources
+  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+
+  // Create select menu for resource selection
+  const row1 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("admin_remove_resource_action")
+      .setPlaceholder("Select action type")
+      .addOptions([
+        { label: "Mining Resource", value: "mining" },
+        { label: "Salvage Resource", value: "salvage" },
+        { label: "Hauling Resource", value: "haul" },
+      ])
+  );
+
+  // Back button
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Update the message
+  await interaction.update({
+    content: "Select the action type for the resource you want to remove:",
+    embeds: [],
+    components: [row1, row2],
+  });
+}
+
+// Add target button handler
+async function handleAddTargetButton(interaction) {
+  // Create select menu for action type
+  const row = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("admin_target_action")
+      .setPlaceholder("Select action type")
+      .addOptions([
+        { label: "Mining Target", value: "mine" },
+        { label: "Salvage Target", value: "salvage" },
+        { label: "Hauling Target", value: "haul" },
+      ])
+  );
+
+  // Update the message
+  await interaction.update({
+    content: "Select the action type for the new target:",
+    embeds: [],
+    components: [row],
+  });
+}
+
+// Reset target button handler
+async function handleResetTargetButton(interaction) {
+  // Load targets data
+  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+
+  // Check if there are any targets
+  if (Object.keys(targetsData.resources).length === 0) {
+    return interaction.update({
+      content: "There are no targets to reset.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+
+  // Create select menu options for targets
+  const options = Object.entries(targetsData.resources).map(
+    ([key, resource]) => {
+      const resourceName =
+        resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
+      const actionName =
+        resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
+
+      return {
+        label: `${actionName} ${resourceName}`,
+        value: key,
+        description: `Target: ${resource.target} SCU`,
+      };
+    }
+  );
+
+  // Create select menu
+  const row1 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("admin_reset_target_select")
+      .setPlaceholder("Select target to remove")
+      .addOptions(options)
+  );
+
+  // Back button
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Update the message
+  await interaction.update({
+    content: "Select the target you want to remove:",
+    embeds: [],
+    components: [row1, row2],
+  });
+}
+
+// Reset progress button handler
+async function handleResetProgressButton(interaction) {
+  // Load targets data
+  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+
+  // Check if there are any targets
+  if (Object.keys(targetsData.resources).length === 0) {
+    return interaction.update({
+      content: "There are no targets to reset progress for.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+
+  // Create select menu options for targets
+  const options = Object.entries(targetsData.resources).map(
+    ([key, resource]) => {
+      const resourceName =
+        resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
+      const actionName =
+        resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
+      const progress = targetsData.progress[key] || { current: 0 };
+
+      return {
+        label: `${actionName} ${resourceName}`,
+        value: key,
+        description: `Current Progress: ${progress.current}/${resource.target} SCU`,
+      };
+    }
+  );
+
+  // Create select menu
+  const row1 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("admin_reset_progress_select")
+      .setPlaceholder("Select target to reset progress")
+      .addOptions(options)
+  );
+
+  // Back button
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Update the message
+  await interaction.update({
+    content:
+      "Select the target to reset progress for (this will keep the target but reset all progress to 0):",
+    embeds: [],
+    components: [row1, row2],
+  });
+}
+
+// Create dashboard button handler
+async function handleCreateDashboardButton(interaction) {
+  // Create modal for channel input
+  const modal = new ModalBuilder()
+    .setCustomId("admin_create_dashboard_modal")
+    .setTitle("Create Live Dashboard");
+
+  // Add input field for channel ID
+  const channelInput = new TextInputBuilder()
+    .setCustomId("dashboard_channel")
+    .setLabel("Channel ID")
+    .setPlaceholder("Enter the ID of the channel for the dashboard")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  // Add rows and fields to modal
+  const firstActionRow = new ActionRowBuilder().addComponents(channelInput);
+  modal.addComponents(firstActionRow);
+
+  // Show the modal
+  await interaction.showModal(modal);
+}
+
+// Auto report button handler
+async function handleAutoReportButton(interaction) {
+  // Load settings
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  const autoReport = settings.autoReport || { enabled: false };
+
+  // Create modal for auto-report settings
+  const modal = new ModalBuilder()
+    .setCustomId("admin_auto_report_modal")
+    .setTitle("Configure Auto Reports");
+
+  // Add input field for channel ID
+  const channelInput = new TextInputBuilder()
+    .setCustomId("auto_report_channel")
+    .setLabel("Channel ID")
+    .setPlaceholder("Enter the ID of the channel for reports")
+    .setValue(autoReport.channelId || "")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  // Add input field for time
+  const timeInput = new TextInputBuilder()
+    .setCustomId("auto_report_time")
+    .setLabel("Time (24h format, UTC)")
+    .setPlaceholder("Enter time in 24h format (e.g., 08:00 or 20:30)")
+    .setValue(autoReport.time || "")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  // Add field for enabled/disabled
+  const enabledInput = new TextInputBuilder()
+    .setCustomId("auto_report_enabled")
+    .setLabel("Enable reports (true/false)")
+    .setPlaceholder('Type "true" to enable, "false" to disable')
+    .setValue(autoReport.enabled ? "true" : "false")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  // Add rows and fields to modal
+  const firstActionRow = new ActionRowBuilder().addComponents(channelInput);
+  const secondActionRow = new ActionRowBuilder().addComponents(timeInput);
+  const thirdActionRow = new ActionRowBuilder().addComponents(enabledInput);
+  modal.addComponents(firstActionRow, secondActionRow, thirdActionRow);
+
+  // Show the modal
+  await interaction.showModal(modal);
+}
+
+// Handle select menu interactions for admin functions
+async function handleAdminSelectMenuInteraction(interaction) {
+  // Verify admin permissions again
+  if (!interaction.member.permissions.has("Administrator")) {
+    return interaction.reply({
+      content: "You do not have permission to use admin controls.",
+      ephemeral: true,
+    });
+  }
+
+  const menuId = interaction.customId;
+  const selectedValue = interaction.values[0];
+
+  switch (menuId) {
+    case "admin_resource_action":
+      await handleResourceActionSelect(interaction, selectedValue);
+      break;
+    case "admin_remove_resource_action":
+      await handleRemoveResourceActionSelect(interaction, selectedValue);
+      break;
+    case "admin_target_action":
+      await handleTargetActionSelect(interaction, selectedValue);
+      break;
+    case "admin_reset_target_select":
+      await handleResetTargetSelect(interaction, selectedValue);
+      break;
+    case "admin_reset_progress_select":
+      await handleResetProgressSelect(interaction, selectedValue);
+      break;
+    case "admin_remove_resource_select":
+      await handleRemoveResourceSelect(interaction, selectedValue);
+      break;
+    case "admin_add_target_resource":
+      await handleAddTargetResourceSelect(interaction, selectedValue);
+      break;
+  }
+}
+
+// Handle resource action selection for adding new resource
+async function handleResourceActionSelect(interaction, actionType) {
+  // Create modal for new resource info
+  const modal = new ModalBuilder()
+    .setCustomId(`admin_add_resource_modal_${actionType}`)
+    .setTitle(
+      `Add ${actionType.charAt(0).toUpperCase() + actionType.slice(1)} Resource`
+    );
+
+  // Add input field for display name
+  const nameInput = new TextInputBuilder()
+    .setCustomId("resource_name")
+    .setLabel("Display Name")
+    .setPlaceholder('Enter the display name (e.g., "Copper")')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  // Add input field for system value
+  const valueInput = new TextInputBuilder()
+    .setCustomId("resource_value")
+    .setLabel("System Value")
+    .setPlaceholder('Enter the system value (lowercase, e.g., "copper")')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  // Add rows and fields to modal
+  const firstActionRow = new ActionRowBuilder().addComponents(nameInput);
+  const secondActionRow = new ActionRowBuilder().addComponents(valueInput);
+  modal.addComponents(firstActionRow, secondActionRow);
+
+  // Show the modal
+  await interaction.showModal(modal);
+}
+
+// Handle remove resource action selection
+async function handleRemoveResourceActionSelect(interaction, actionType) {
+  // Load resources
+  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+
+  // Get resources for the selected action type
+  const actionResources = resources[actionType] || [];
+
+  // Check if there are resources to remove
+  if (actionResources.length === 0) {
+    return interaction.update({
+      content: `There are no ${actionType} resources to remove.`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+
+  // Create select menu options for resources
+  const options = actionResources.map((resource) => ({
+    label: resource.name,
+    value: resource.value,
+    description: `Remove ${resource.name} (${resource.value})`,
+  }));
+
+  // Create select menu
+  const row1 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("admin_remove_resource_select")
+      .setPlaceholder(`Select ${actionType} resource to remove`)
+      .addOptions(options)
+  );
+
+  // Back button
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Update the message
+  await interaction.update({
+    content: `Select the ${actionType} resource you want to remove:`,
+    components: [row1, row2],
+  });
+}
+
+// Handle target action selection for new target
+async function handleTargetActionSelect(interaction, actionType) {
+  // Load resources
+  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+
+  // Map action type to resource category
+  const resourceCategory =
+    actionType === "mine"
+      ? "mining"
+      : actionType === "salvage"
+      ? "salvage"
+      : "haul";
+
+  // Get resources for the action type
+  const actionResources = resources[resourceCategory] || [];
+
+  // Check if there are resources available
+  if (actionResources.length === 0) {
+    return interaction.update({
+      content: `There are no resources defined for ${actionType} action. Please add resources first.`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+
+  // Create select menu options for resources
+  const options = actionResources.map((resource) => ({
+    label: resource.name,
+    value: resource.value,
+    description: `${resource.name} (${resource.value})`,
+  }));
+
+  // Create select menu
+  const row1 = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder()
+      .setCustomId("admin_add_target_resource")
+      .setPlaceholder(`Select ${actionType} resource`)
+      .addOptions(options)
+  );
+
+  // Store action type in a hidden field
+  const hiddenActionType = new TextInputBuilder()
+    .setCustomId("hidden_action_type")
+    .setValue(actionType);
+
+  // Back button
+  const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_back")
+      .setLabel("Back to Admin")
+      .setStyle(ButtonStyle.Secondary)
+  );
+
+  // Update the message
+  await interaction.update({
+    content: `Select the resource for the new ${actionType} target:`,
+    components: [row1, row2],
+  });
+}
+
+// Handle reset target selection
+async function handleResetTargetSelect(interaction, targetKey) {
+  try {
+    // Load targets data
+    const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+
+    // Get resource info
+    const resource = targetsData.resources[targetKey];
+    if (!resource) {
+      throw new Error("Target not found");
+    }
+
+    // Remove target and progress
+    delete targetsData.resources[targetKey];
+    delete targetsData.progress[targetKey];
+
+    // Save updated data
+    fs.writeFileSync(targetsPath, JSON.stringify(targetsData, null, 2), "utf8");
+
+    // Update dashboards
+    await updateDashboards(interaction.client);
+
+    // Get resource and action names
+    const resourceName =
+      resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
+    const actionName =
+      resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
+
+    // Success message
+    await interaction.update({
+      content: `Successfully removed target for ${actionName} ${resourceName}.`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_targets")
+            .setLabel("Back to Targets")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error removing target:", error);
+
+    await interaction.update({
+      content: `Error removing target: ${error.message}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+// Handle reset progress selection
+async function handleResetProgressSelect(interaction, targetKey) {
+  try {
+    // Load targets data
+    const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+
+    // Get resource info
+    const resource = targetsData.resources[targetKey];
+    if (!resource) {
+      throw new Error("Target not found");
+    }
+
+    // Reset progress but keep target
+    targetsData.progress[targetKey] = {
+      current: 0,
+      contributions: [],
+    };
+
+    // Save updated data
+    fs.writeFileSync(targetsPath, JSON.stringify(targetsData, null, 2), "utf8");
+
+    // Update dashboards
+    await updateDashboards(interaction.client);
+
+    // Get resource and action names
+    const resourceName =
+      resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
+    const actionName =
+      resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
+
+    // Success message
+    await interaction.update({
+      content: `Successfully reset progress for ${actionName} ${resourceName}. Progress is now 0/${resource.target} SCU.`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_targets")
+            .setLabel("Back to Targets")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error resetting progress:", error);
+
+    await interaction.update({
+      content: `Error resetting progress: ${error.message}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+// Handle resource selection for removal
+async function handleRemoveResourceSelect(interaction, resourceValue) {
+  // Get action type from message content
+  const content = interaction.message.content;
+  const actionMatch = content.match(/Select the (\w+) resource/);
+
+  if (!actionMatch) {
+    return interaction.update({
+      content: "Error: Could not determine action type",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+
+  const actionType = actionMatch[1];
+
+  try {
+    // Load resources
+    const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+
+    // Find the resource
+    const resource = resources[actionType].find(
+      (r) => r.value === resourceValue
+    );
+    if (!resource) {
+      throw new Error("Resource not found");
+    }
+
+    // Remove the resource
+    resources[actionType] = resources[actionType].filter(
+      (r) => r.value !== resourceValue
+    );
+
+    // Save updated resources
+    fs.writeFileSync(resourcesPath, JSON.stringify(resources, null, 2), "utf8");
+
+    // Success message
+    await interaction.update({
+      content: `Successfully removed ${resource.name} (${resource.value}) from ${actionType} resources.`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_resources")
+            .setLabel("Back to Resources")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error removing resource:", error);
+
+    await interaction.update({
+      content: `Error removing resource: ${error.message}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+// Handle resource selection for new target
+async function handleAddTargetResourceSelect(interaction, resourceValue) {
+  // Create modal for target amount
+  const modal = new ModalBuilder()
+    .setCustomId(`admin_add_target_modal_${resourceValue}`)
+    .setTitle(`Set Target Amount`);
+
+  // Add input field for amount
+  const amountInput = new TextInputBuilder()
+    .setCustomId("target_amount")
+    .setLabel("Target Amount (SCU)")
+    .setPlaceholder("Enter the target amount in SCU")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  // Add rows and fields to modal
+  const firstActionRow = new ActionRowBuilder().addComponents(amountInput);
+  modal.addComponents(firstActionRow);
+
+  // Show the modal
+  await interaction.showModal(modal);
+}
+
+// Handle modal submissions for admin functions
+async function handleAdminModalSubmit(interaction) {
+  // Verify admin permissions again
+  if (!interaction.member.permissions.has("Administrator")) {
+    return interaction.reply({
+      content: "You do not have permission to use admin controls.",
+      ephemeral: true,
+    });
+  }
+
+  const modalId = interaction.customId;
+
+  if (modalId.startsWith("admin_add_resource_modal_")) {
+    // Add new resource
+    const actionType = modalId.replace("admin_add_resource_modal_", "");
+    const name = interaction.fields.getTextInputValue("resource_name");
+    const value = interaction.fields
+      .getTextInputValue("resource_value")
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+
+    try {
+      // Load resources
+      const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+
+      // Ensure the action type exists
+      if (!resources[actionType]) {
+        resources[actionType] = [];
+      }
+
+      // Check if resource already exists
+      if (resources[actionType].some((r) => r.value === value)) {
+        throw new Error(`Resource with value "${value}" already exists`);
+      }
+
+      // Add the new resource
+      resources[actionType].push({ name, value });
+
+      // Save updated resources
+      fs.writeFileSync(
+        resourcesPath,
+        JSON.stringify(resources, null, 2),
+        "utf8"
+      );
+
+      // Success message
+      await interaction.reply({
+        content: `Successfully added ${name} (${value}) to ${actionType} resources.`,
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_resources")
+              .setLabel("Back to Resources")
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    } catch (error) {
+      console.error("Error adding resource:", error);
+
+      await interaction.reply({
+        content: `Error adding resource: ${error.message}`,
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+  } else if (modalId.startsWith("admin_add_target_modal_")) {
+    // Add new target
+    const resourceKey = modalId.replace("admin_add_target_modal_", "");
+    const amount = parseInt(
+      interaction.fields.getTextInputValue("target_amount")
+    );
+
+    // Get action type from message content
+    const content = interaction.message.content;
+    const actionMatch = content.match(
+      /Select the resource for the new (\w+) target/
+    );
+
+    if (!actionMatch) {
+      return interaction.reply({
+        content: "Error: Could not determine action type",
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const action = actionMatch[1];
+
+    try {
+      // Load resources to get the resource name
+      const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+
+      // Map action to resource category
+      const resourceCategory =
+        action === "mine"
+          ? "mining"
+          : action === "salvage"
+          ? "salvage"
+          : "haul";
+
+      // Find the resource
+      const resourceInfo = resources[resourceCategory].find(
+        (r) => r.value === resourceKey
+      );
+      if (!resourceInfo) {
+        throw new Error("Resource not found");
+      }
+
+      // Load targets data
+      const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+
+      // Create the target key
+      const targetKey = `${action}_${resourceKey}`;
+
+      // Set the target
+      targetsData.resources[targetKey] = {
+        action,
+        resource: resourceKey,
+        target: amount,
+        createdAt: new Date().toISOString(),
+        createdBy: interaction.user.id,
+      };
+
+      // Initialize progress if it doesn't exist
+      if (!targetsData.progress[targetKey]) {
+        targetsData.progress[targetKey] = {
+          current: 0,
+          contributions: [],
+        };
+      }
+
+      // Save updated targets
+      fs.writeFileSync(
+        targetsPath,
+        JSON.stringify(targetsData, null, 2),
+        "utf8"
+      );
+
+      // Update dashboards
+      await updateDashboards(interaction.client);
+
+      // Success message
+      await interaction.reply({
+        content: `Successfully set target: ${action} ${amount} SCU of ${resourceInfo.name}`,
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_targets")
+              .setLabel("Back to Targets")
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    } catch (error) {
+      console.error("Error adding target:", error);
+
+      await interaction.reply({
+        content: `Error adding target: ${error.message}`,
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+  } else if (modalId === "admin_create_dashboard_modal") {
+    // Create dashboard
+    const channelId = interaction.fields.getTextInputValue("dashboard_channel");
+
+    try {
+      // Get the channel
+      const channel = await interaction.client.channels.fetch(channelId);
+
+      if (!channel) {
+        throw new Error("Channel not found");
+      }
+
+      // Create LiveDashboard command
+      const dashboardCommand = interaction.client.commands.get("livedashboard");
+      if (!dashboardCommand) {
+        throw new Error("LiveDashboard command not found");
+      }
+
+      // Create options for the command
+      const options = {
+        getChannel: () => channel,
+      };
+
+      // Create a mock interaction
+      const mockInteraction = {
+        ...interaction,
+        options,
+        deferReply: async () => {},
+        editReply: async (data) => {
+          await interaction.reply({
+            content: "Dashboard created successfully!",
+            ephemeral: true,
+            components: [
+              new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                  .setCustomId("admin_display")
+                  .setLabel("Back to Display Controls")
+                  .setStyle(ButtonStyle.Primary),
+                new ButtonBuilder()
+                  .setCustomId("admin_back")
+                  .setLabel("Back to Admin")
+                  .setStyle(ButtonStyle.Secondary)
+              ),
+            ],
+          });
+        },
+      };
+
+      // Execute the command
+      await dashboardCommand.execute(mockInteraction);
+    } catch (error) {
+      console.error("Error creating dashboard:", error);
+
+      await interaction.reply({
+        content: `Error creating dashboard: ${error.message}`,
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+  } else if (modalId === "admin_auto_report_modal") {
+    // Configure auto reports
+    const channelId = interaction.fields.getTextInputValue(
+      "auto_report_channel"
+    );
+    const time = interaction.fields.getTextInputValue("auto_report_time");
+    const enabled =
+      interaction.fields
+        .getTextInputValue("auto_report_enabled")
+        .toLowerCase() === "true";
+
+    // Validate time format (24h: HH:MM)
+    const timeRegex = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
+    if (!timeRegex.test(time)) {
+      return interaction.reply({
+        content:
+          "Invalid time format. Please use 24h format (e.g., 08:00 or 20:30).",
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_display")
+              .setLabel("Back to Display Controls")
+              .setStyle(ButtonStyle.Primary)
+          ),
+        ],
+      });
+    }
+
+    try {
+      // Get the channel
+      const channel = await interaction.client.channels.fetch(channelId);
+
+      if (!channel) {
+        throw new Error("Channel not found");
+      }
+
+      // Load settings
+      let settings = {};
+      if (fs.existsSync(settingsPath)) {
+        settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+      }
+
+      // Update auto report settings
+      settings.autoReport = {
+        enabled,
+        channelId,
+        time,
+        guildId: interaction.guild.id,
+        lastReportDate: settings.autoReport?.lastReportDate || null,
+      };
+
+      // Save settings
+      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
+
+      // Success message
+      await interaction.reply({
+        content: `Auto reports ${enabled ? "enabled" : "disabled"}. ${
+          enabled
+            ? `Reports will be posted in <#${channelId}> at ${time} UTC.`
+            : ""
+        }`,
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_display")
+              .setLabel("Back to Display Controls")
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    } catch (error) {
+      console.error("Error configuring auto reports:", error);
+
+      await interaction.reply({
+        content: `Error configuring auto reports: ${error.message}`,
+        ephemeral: true,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+  }
+}
+
+module.exports = {
+  handleAdminButtonInteraction,
+  handleAdminSelectMenuInteraction,
+  handleAdminModalSubmit,
+};

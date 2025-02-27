@@ -1,0 +1,57 @@
+{
+  "resources": {
+    "mine_iron": {
+      "action": "mine",
+      "resource": "iron",
+      "target": 400,
+      "createdAt": "2025-02-27T08:16:11.857Z",
+      "createdBy": "615971782293192714"
+    },
+    "salvage_scrap_metal": {
+      "action": "salvage",
+      "resource": "scrap_metal",
+      "target": 600,
+      "createdAt": "2025-02-27T09:43:24.289Z",
+      "createdBy": "615971782293192714"
+    }
+  },
+  "progress": {
+    "mine_iron": {
+      "current": 300,
+      "contributions": [
+        {
+          "userId": "615971782293192714",
+          "username": "xlizer",
+          "amount": 47,
+          "location": "hurston",
+          "timestamp": "2025-02-27T08:18:34.172Z"
+        },
+        {
+          "userId": "615971782293192714",
+          "username": "xlizer",
+          "amount": 20,
+          "location": "daymar",
+          "timestamp": "2025-02-27T08:29:31.804Z"
+        },
+        {
+          "userId": "615971782293192714",
+          "username": "xlizer",
+          "amount": 200,
+          "location": "yela",
+          "timestamp": "2025-02-27T08:41:11.961Z"
+        },
+        {
+          "userId": "615971782293192714",
+          "username": "xlizer",
+          "amount": 33,
+          "location": "yela",
+          "timestamp": "2025-02-27T08:47:08.546Z"
+        }
+      ]
+    },
+    "salvage_scrap_metal": {
+      "current": 0,
+      "contributions": []
+    }
+  }
+}

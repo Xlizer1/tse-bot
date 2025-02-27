@@ -1,0 +1,80 @@
+{
+  "mining": [
+    {
+      "name": "Copper",
+      "value": "copper"
+    },
+    {
+      "name": "Iron",
+      "value": "iron"
+    },
+    {
+      "name": "Gold",
+      "value": "gold"
+    },
+    {
+      "name": "Diamond",
+      "value": "diamond"
+    },
+    {
+      "name": "Quantainium",
+      "value": "quantainium"
+    },
+    {
+      "name": "Titanium",
+      "value": "titanium"
+    },
+    {
+      "name": "Aluminum",
+      "value": "aluminum"
+    }
+  ],
+  "salvage": [
+    {
+      "name": "RMC",
+      "value": "rmc"
+    },
+    {
+      "name": "CM",
+      "value": "cm"
+    },
+    {
+      "name": "Scrap Metal",
+      "value": "scrap_metal"
+    },
+    {
+      "name": "Ship Parts",
+      "value": "ship_parts"
+    }
+  ],
+  "haul": [
+    {
+      "name": "Iron",
+      "value": "iron"
+    },
+    {
+      "name": "Copper",
+      "value": "copper"
+    },
+    {
+      "name": "Medical Supplies",
+      "value": "medical_supplies"
+    },
+    {
+      "name": "Agricultural Supplies",
+      "value": "agricultural_supplies"
+    },
+    {
+      "name": "Titanium",
+      "value": "titanium"
+    },
+    {
+      "name": "Hydrogen",
+      "value": "hydrogen"
+    },
+    {
+      "name": "Chlorine",
+      "value": "chlorine"
+    }
+  ]
+}

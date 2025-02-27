@@ -1,0 +1,21 @@
+{
+  "name": "tse-bot",
+  "version": "1.0.0",
+  "description": "Terra Star Expeditionary's Discord Bot",
+  "main": "index.js",
+  "repository": "https://github.com/Xlizer1/tse-bot",
+  "author": "xlizer",
+  "license": "MIT",
+  "private": true,
+  "scripts": {
+    "dev": "node src/deploy-commands.js && nodemon src/index.js"
+  },
+  "dependencies": {
+    "@discordjs/rest": "^1.7.1",
+    "discord-api-types": "^0.37.61",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7",
+    "exceljs": "^4.4.0",
+    "nodemon": "^3.0.3"
+  }
+}
