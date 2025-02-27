@@ -31,11 +31,11 @@
   ],
   "salvage": [
     {
-      "name": "RMC",
+      "name": "Recycled Material Composite",
       "value": "rmc"
     },
     {
-      "name": "CM",
+      "name": "Construction Materials",
       "value": "cm"
     },
     {
@@ -48,6 +48,14 @@
     }
   ],
   "haul": [
+    {
+      "name": "Recycled Material Composite",
+      "value": "rmc"
+    },
+    {
+      "name": "Construction Materials",
+      "value": "cm"
+    },
     {
       "name": "Iron",
       "value": "iron"
@@ -75,6 +83,10 @@
     {
       "name": "Chlorine",
       "value": "chlorine"
+    },
+    {
+      "name": "Diamonds",
+      "value": "diamonds"
     }
   ]
 }

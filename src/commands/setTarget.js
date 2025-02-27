@@ -37,8 +37,8 @@ if (!fs.existsSync(resourcesPath)) {
             { name: 'Aluminum', value: 'aluminum' }
         ],
         salvage: [
-            { name: 'RMC', value: 'rmc' },
-            { name: 'CM', value: 'cm' },
+            { name: 'Recycled Material Composite', value: 'rmc' },
+            { name: 'Construction Materials', value: 'cm' },
             { name: 'Scrap Metal', value: 'scrap_metal' },
             { name: 'Ship Parts', value: 'ship_parts' }
         ],
