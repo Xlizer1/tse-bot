@@ -1,9 +1,8 @@
+// src/commands/reset.js
 const { SlashCommandBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
-
-// Path to store targets data
-const targetsPath = path.join(__dirname, '..', 'data', 'targets.json');
+const TargetModel = require('../models/target');
+const ResourceModel = require('../models/resource');
+const { updateDashboards } = require('../dashboard-updater');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -49,72 +48,71 @@ module.exports = {
                         .setRequired(true))),
     
     async execute(interaction) {
-        // Check admin permissions
-        if (!interaction.member.permissions.has('Administrator')) {
-            return interaction.reply({ 
-                content: 'You do not have permission to use this command. Only administrators can reset data.', 
-                ephemeral: true 
-            });
-        }
-
-        // Check if targets file exists
-        if (!fs.existsSync(targetsPath)) {
-            return interaction.reply({ 
-                content: 'No targets have been set yet.', 
-                ephemeral: true 
-            });
-        }
-        
-        // Load data
-        let targetsData = JSON.parse(fs.readFileSync(targetsPath, 'utf8'));
-        const subcommand = interaction.options.getSubcommand();
-        
-        if (subcommand === 'all') {
-            // Reset all data
-            // Create backup before reset
-            const backupPath = path.join(__dirname, '..', 'data', `backup_${Date.now()}.json`);
-            fs.writeFileSync(backupPath, JSON.stringify(targetsData, null, 2), 'utf8');
-            
-            // Reset to empty data structure
-            targetsData = {
-                resources: {},
-                progress: {}
-            };
-            
-            fs.writeFileSync(targetsPath, JSON.stringify(targetsData, null, 2), 'utf8');
-            await interaction.reply(`All targets and progress have been reset. A backup was saved at ${backupPath}`);
-            
-        } else if (subcommand === 'target' || subcommand === 'progress') {
-            const action = interaction.options.getString('action');
-            const resource = interaction.options.getString('resource').toLowerCase();
-            const resourceKey = `${action}_${resource}`;
-            
-            // Check if the target exists
-            if (!targetsData.resources[resourceKey]) {
+        try {
+            // Check admin permissions
+            if (!interaction.member.permissions.has('Administrator')) {
                 return interaction.reply({ 
-                    content: `No target found for ${action} ${resource}.`, 
+                    content: 'You do not have permission to use this command. Only administrators can reset data.', 
                     ephemeral: true 
                 });
             }
+
+            const subcommand = interaction.options.getSubcommand();
             
-            if (subcommand === 'target') {
-                // Remove both target and progress
-                delete targetsData.resources[resourceKey];
-                delete targetsData.progress[resourceKey];
+            if (subcommand === 'all') {
+                // This operation is more complex with a database
+                // We'll list all targets first
+                const targets = await TargetModel.getAllWithProgress();
                 
-                fs.writeFileSync(targetsPath, JSON.stringify(targetsData, null, 2), 'utf8');
-                await interaction.reply(`Target and progress for ${action} ${resource} have been reset.`);
+                if (targets.length === 0) {
+                    return interaction.reply({
+                        content: 'No targets have been set yet.',
+                        ephemeral: true
+                    });
+                }
                 
-            } else if (subcommand === 'progress') {
-                // Reset progress but keep target
-                targetsData.progress[resourceKey] = {
-                    current: 0,
-                    contributions: []
-                };
+                // Delete all targets one by one
+                for (const target of targets) {
+                    await TargetModel.delete(target.id);
+                }
                 
-                fs.writeFileSync(targetsPath, JSON.stringify(targetsData, null, 2), 'utf8');
-                await interaction.reply(`Progress for ${action} ${resource} has been reset. Target remains unchanged.`);
+                await interaction.reply('All targets and progress have been reset.');
+                
+                // Update dashboards
+                await updateDashboards(interaction.client);
+            } else if (subcommand === 'target' || subcommand === 'progress') {
+                const action = interaction.options.getString('action');
+                const resource = interaction.options.getString('resource').toLowerCase();
+                
+                // Get the target
+                const target = await TargetModel.getByActionAndResource(action, resource);
+                
+                if (!target) {
+                    return interaction.reply({ 
+                        content: `No target found for ${action} ${resource}.`, 
+                        ephemeral: true 
+                    });
+                }
+                
+                if (subcommand === 'target') {
+                    // Delete the target completely
+                    await TargetModel.delete(target.id);
+                    await interaction.reply(`Target and progress for ${action} ${resource} have been reset.`);
+                } else if (subcommand === 'progress') {
+                    // Reset progress but keep target
+                    await TargetModel.resetProgress(target.id);
+                    await interaction.reply(`Progress for ${action} ${resource} has been reset. Target remains unchanged.`);
+                }
+                
+                // Update dashboards
+                await updateDashboards(interaction.client);
             }
+        } catch (error) {
+            console.error('Error in reset command:', error);
+            await interaction.reply({
+                content: 'An error occurred while resetting data.',
+                ephemeral: true
+            });
         }
     },
 };

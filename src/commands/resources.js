@@ -1,9 +1,6 @@
+// src/commands/resources.js
 const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
-const fs = require('fs');
-const path = require('path');
-
-// Path to store resource definitions
-const resourcesPath = path.join(__dirname, '..', 'data', 'resources.json');
+const ResourceModel = require('../models/resource');
 
 module.exports = {
     data: new SlashCommandBuilder()
@@ -63,156 +60,127 @@ module.exports = {
                         .setRequired(true))),
     
     async execute(interaction) {
-        // Ensure resources file exists
-        if (!fs.existsSync(resourcesPath)) {
-            // Create default resources list
-            const defaultResources = {
-                mining: [
-                    { name: 'Copper', value: 'copper' },
-                    { name: 'Iron', value: 'iron' },
-                    { name: 'Gold', value: 'gold' },
-                    { name: 'Diamond', value: 'diamond' },
-                    { name: 'Quantainium', value: 'quantainium' },
-                    { name: 'Titanium', value: 'titanium' },
-                    { name: 'Aluminum', value: 'aluminum' }
-                ],
-                salvage: [
-                    { name: 'Recycled Material Composite', value: 'rmc' },
-                    { name: 'Construction Materials', value: 'cm' },
-                    { name: 'Scrap Metal', value: 'scrap_metal' },
-                    { name: 'Ship Parts', value: 'ship_parts' }
-                ],
-                haul: [
-                    { name: 'Iron', value: 'iron' },
-                    { name: 'Copper', value: 'copper' },
-                    { name: 'Medical Supplies', value: 'medical_supplies' },
-                    { name: 'Agricultural Supplies', value: 'agricultural_supplies' },
-                    { name: 'Titanium', value: 'titanium' },
-                    { name: 'Hydrogen', value: 'hydrogen' },
-                    { name: 'Chlorine', value: 'chlorine' }
-                ]
-            };
+        try {
+            const subcommand = interaction.options.getSubcommand();
             
-            fs.writeFileSync(resourcesPath, JSON.stringify(defaultResources, null, 2), 'utf8');
-        }
-        
-        // Load resources
-        const resources = JSON.parse(fs.readFileSync(resourcesPath, 'utf8'));
-        
-        const subcommand = interaction.options.getSubcommand();
-        
-        if (subcommand === 'list') {
-            const actionType = interaction.options.getString('action') || 'all';
-            
-            const embed = new EmbedBuilder()
-                .setColor(0x0099FF)
-                .setTitle('Available Resources')
-                .setDescription('Resources that can be selected for operations')
-                .setTimestamp();
-            
-            if (actionType === 'all') {
-                // Add all action types
-                if (resources.mining && resources.mining.length > 0) {
+            if (subcommand === 'list') {
+                const actionType = interaction.options.getString('action') || 'all';
+                
+                const embed = new EmbedBuilder()
+                    .setColor(0x0099FF)
+                    .setTitle('Available Resources')
+                    .setDescription('Resources that can be selected for operations')
+                    .setTimestamp();
+                
+                if (actionType === 'all') {
+                    // Get all resources grouped by type
+                    const groupedResources = await ResourceModel.getGroupedResources();
+                    
+                    // Add mining resources
+                    if (groupedResources.mining && groupedResources.mining.length > 0) {
+                        embed.addFields({
+                            name: 'Mining Resources',
+                            value: groupedResources.mining.map(r => `• ${r.name} (${r.value})`).join('\n') || 'None defined'
+                        });
+                    }
+                    
+                    // Add salvage resources
+                    if (groupedResources.salvage && groupedResources.salvage.length > 0) {
+                        embed.addFields({
+                            name: 'Salvage Resources',
+                            value: groupedResources.salvage.map(r => `• ${r.name} (${r.value})`).join('\n') || 'None defined'
+                        });
+                    }
+                    
+                    // Add haul resources
+                    if (groupedResources.haul && groupedResources.haul.length > 0) {
+                        embed.addFields({
+                            name: 'Haul Resources',
+                            value: groupedResources.haul.map(r => `• ${r.name} (${r.value})`).join('\n') || 'None defined'
+                        });
+                    }
+                } else {
+                    // Get specific action type resources
+                    const resources = await ResourceModel.getByActionType(actionType);
+                    
                     embed.addFields({
-                        name: 'Mining Resources',
-                        value: resources.mining.map(r => `• ${r.name} (${r.value})`).join('\n') || 'None defined'
+                        name: `${actionType.charAt(0).toUpperCase() + actionType.slice(1)} Resources`,
+                        value: resources.length > 0 
+                            ? resources.map(r => `• ${r.name} (${r.value})`).join('\n') 
+                            : 'None defined'
                     });
                 }
                 
-                if (resources.salvage && resources.salvage.length > 0) {
-                    embed.addFields({
-                        name: 'Salvage Resources',
-                        value: resources.salvage.map(r => `• ${r.name} (${r.value})`).join('\n') || 'None defined'
+                await interaction.reply({ embeds: [embed] });
+                
+            } else if (subcommand === 'add') {
+                // Check admin permissions
+                if (!interaction.member.permissions.has('Administrator')) {
+                    return interaction.reply({ 
+                        content: 'You do not have permission to add resources. Only administrators can manage resources.', 
+                        ephemeral: true 
                     });
                 }
                 
-                if (resources.haul && resources.haul.length > 0) {
-                    embed.addFields({
-                        name: 'Haul Resources',
-                        value: resources.haul.map(r => `• ${r.name} (${r.value})`).join('\n') || 'None defined'
+                const actionType = interaction.options.getString('action');
+                const name = interaction.options.getString('name');
+                const value = interaction.options.getString('value').toLowerCase().replace(/\s+/g, '_');
+                
+                // Check if resource already exists
+                const existingResource = await ResourceModel.getByValueAndType(value, actionType);
+                
+                if (existingResource) {
+                    return interaction.reply({ 
+                        content: `Resource "${value}" already exists for the ${actionType} action type.`, 
+                        ephemeral: true 
                     });
                 }
-            } else {
-                // Add specific action type
-                const typeResources = resources[actionType] || [];
-                embed.addFields({
-                    name: `${actionType.charAt(0).toUpperCase() + actionType.slice(1)} Resources`,
-                    value: typeResources.map(r => `• ${r.name} (${r.value})`).join('\n') || 'None defined'
-                });
+                
+                // Add the resource
+                await ResourceModel.add(name, value, actionType);
+                
+                await interaction.reply(`Added "${name}" (${value}) to the ${actionType} resources list.`);
+                
+            } else if (subcommand === 'remove') {
+                // Check admin permissions
+                if (!interaction.member.permissions.has('Administrator')) {
+                    return interaction.reply({ 
+                        content: 'You do not have permission to remove resources. Only administrators can manage resources.', 
+                        ephemeral: true 
+                    });
+                }
+                
+                const actionType = interaction.options.getString('action');
+                const value = interaction.options.getString('value').toLowerCase();
+                
+                // Check if resource exists
+                const resource = await ResourceModel.getByValueAndType(value, actionType);
+                
+                if (!resource) {
+                    return interaction.reply({ 
+                        content: `Resource "${value}" not found in the ${actionType} resources list.`, 
+                        ephemeral: true 
+                    });
+                }
+                
+                // Remove the resource
+                const success = await ResourceModel.remove(value, actionType);
+                
+                if (success) {
+                    await interaction.reply(`Removed "${resource.name}" (${value}) from the ${actionType} resources list.`);
+                } else {
+                    await interaction.reply({ 
+                        content: `Failed to remove resource "${value}". It might be in use by active targets.`,
+                        ephemeral: true 
+                    });
+                }
             }
-            
-            await interaction.reply({ embeds: [embed] });
-            
-        } else if (subcommand === 'add') {
-            // Check admin permissions
-            if (!interaction.member.permissions.has('Administrator')) {
-                return interaction.reply({ 
-                    content: 'You do not have permission to add resources. Only administrators can manage resources.', 
-                    ephemeral: true 
-                });
-            }
-            
-            const actionType = interaction.options.getString('action');
-            const name = interaction.options.getString('name');
-            const value = interaction.options.getString('value').toLowerCase().replace(/\s+/g, '_');
-            
-            // Ensure the category exists
-            if (!resources[actionType]) {
-                resources[actionType] = [];
-            }
-            
-            // Check if resource already exists
-            const exists = resources[actionType].some(r => r.value === value);
-            if (exists) {
-                return interaction.reply({ 
-                    content: `Resource "${value}" already exists for the ${actionType} action type.`, 
-                    ephemeral: true 
-                });
-            }
-            
-            // Add the resource
-            resources[actionType].push({ name, value });
-            
-            // Save the updated resources
-            fs.writeFileSync(resourcesPath, JSON.stringify(resources, null, 2), 'utf8');
-            
-            await interaction.reply(`Added "${name}" (${value}) to the ${actionType} resources list.`);
-            
-        } else if (subcommand === 'remove') {
-            // Check admin permissions
-            if (!interaction.member.permissions.has('Administrator')) {
-                return interaction.reply({ 
-                    content: 'You do not have permission to remove resources. Only administrators can manage resources.', 
-                    ephemeral: true 
-                });
-            }
-            
-            const actionType = interaction.options.getString('action');
-            const value = interaction.options.getString('value').toLowerCase();
-            
-            // Check if the category exists
-            if (!resources[actionType]) {
-                return interaction.reply({ 
-                    content: `No resources found for the ${actionType} action type.`, 
-                    ephemeral: true 
-                });
-            }
-            
-            // Check if resource exists
-            const initialLength = resources[actionType].length;
-            resources[actionType] = resources[actionType].filter(r => r.value !== value);
-            
-            if (resources[actionType].length === initialLength) {
-                return interaction.reply({ 
-                    content: `Resource "${value}" not found in the ${actionType} resources list.`, 
-                    ephemeral: true 
-                });
-            }
-            
-            // Save the updated resources
-            fs.writeFileSync(resourcesPath, JSON.stringify(resources, null, 2), 'utf8');
-            
-            await interaction.reply(`Removed "${value}" from the ${actionType} resources list.`);
+        } catch (error) {
+            console.error('Error in resources command:', error);
+            await interaction.reply({
+                content: 'An error occurred while managing resources.',
+                ephemeral: true
+            });
         }
     },
 };

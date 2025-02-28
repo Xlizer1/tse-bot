@@ -1,3 +1,5 @@
+// admin-handlers.js - Updated to use MySQL database
+
 const {
   EmbedBuilder,
   ActionRowBuilder,
@@ -13,94 +15,20 @@ const fs = require("fs");
 const path = require("path");
 const ExcelJS = require("exceljs");
 
-// Path to store targets data
-const targetsPath = path.join(__dirname, "data", "targets.json");
-// Path to store resource definitions
-const resourcesPath = path.join(__dirname, "data", "resources.json");
-// Path to store settings
-const settingsPath = path.join(__dirname, "data", "settings.json");
+// Import models
+const ResourceModel = require("./models/resource");
+const TargetModel = require("./models/target");
+const ContributionModel = require("./models/contribution");
+const { DashboardModel, SettingModel } = require("./models/dashboard");
 
 // Import updateDashboards directly to avoid circular dependency
 const { updateDashboards } = require("./dashboard-updater");
-
-// Ensure files exist
-function ensureFilesExist() {
-  // Ensure data directory exists
-  const dataDir = path.join(__dirname, "data");
-  if (!fs.existsSync(dataDir)) {
-    fs.mkdirSync(dataDir, { recursive: true });
-  }
-
-  // Ensure targets file exists
-  if (!fs.existsSync(targetsPath)) {
-    fs.writeFileSync(
-      targetsPath,
-      JSON.stringify({
-        resources: {},
-        progress: {},
-      }),
-      "utf8"
-    );
-  }
-
-  // Ensure resources file exists
-  if (!fs.existsSync(resourcesPath)) {
-    // Default resources list
-    const defaultResources = {
-      mining: [
-        { name: "Copper", value: "copper" },
-        { name: "Iron", value: "iron" },
-        { name: "Gold", value: "gold" },
-        { name: "Diamond", value: "diamond" },
-        { name: "Quantainium", value: "quantainium" },
-        { name: "Titanium", value: "titanium" },
-        { name: "Aluminum", value: "aluminum" },
-      ],
-      salvage: [
-        { name: "Recycled Material Composite", value: "rmc" },
-        { name: "Construction Materials", value: "cm" },
-        { name: "Scrap Metal", value: "scrap_metal" },
-        { name: "Ship Parts", value: "ship_parts" },
-      ],
-      haul: [
-        { name: "Iron", value: "iron" },
-        { name: "Copper", value: "copper" },
-        { name: "Medical Supplies", value: "medical_supplies" },
-        { name: "Agricultural Supplies", value: "agricultural_supplies" },
-        { name: "Titanium", value: "titanium" },
-        { name: "Hydrogen", value: "hydrogen" },
-        { name: "Chlorine", value: "chlorine" },
-      ],
-    };
-
-    fs.writeFileSync(
-      resourcesPath,
-      JSON.stringify(defaultResources, null, 2),
-      "utf8"
-    );
-  }
-
-  // Ensure settings file exists
-  if (!fs.existsSync(settingsPath)) {
-    fs.writeFileSync(
-      settingsPath,
-      JSON.stringify({
-        dashboards: [],
-        autoReport: {
-          enabled: false,
-        },
-      }),
-      "utf8"
-    );
-  }
-}
 
 // Handle admin dashboard button interactions
 async function handleAdminButtonInteraction(interaction) {
   // Verify admin permissions again
   if (!interaction.member.permissions.has("Administrator")) {
-    await interaction.deferReply({ ephemeral: true });
-    return interaction.editReply({
+    return interaction.reply({
       content: "You do not have permission to use admin controls.",
       ephemeral: true,
     });
@@ -108,9 +36,6 @@ async function handleAdminButtonInteraction(interaction) {
 
   // Get the button ID that was clicked
   const buttonId = interaction.customId;
-
-  // Ensure files exist
-  ensureFilesExist();
 
   switch (buttonId) {
     case "admin_resources":
@@ -157,138 +82,169 @@ async function handleAdminButtonInteraction(interaction) {
 
 // Resource Management
 async function handleResourcesButton(interaction) {
-  // Load resources
-  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+  try {
+    // Load resources from database
+    const groupedResources = await ResourceModel.getGroupedResources();
 
-  // Create resources embed
-  const resourcesEmbed = new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle("Resource Management")
-    .setDescription(
-      "Manage resources for mining, salvage, and hauling operations"
-    )
-    .setTimestamp();
+    // Create resources embed
+    const resourcesEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("Resource Management")
+      .setDescription(
+        "Manage resources for mining, salvage, and hauling operations"
+      )
+      .setTimestamp();
 
-  // Add mining resources
-  let miningText = "";
-  if (resources.mining && resources.mining.length > 0) {
-    miningText = resources.mining
-      .map((r) => `• ${r.name} (${r.value})`)
-      .join("\n");
-  } else {
-    miningText = "No mining resources defined";
+    // Add mining resources
+    let miningText = "";
+    if (groupedResources.mining && groupedResources.mining.length > 0) {
+      miningText = groupedResources.mining
+        .map((r) => `• ${r.name} (${r.value})`)
+        .join("\n");
+    } else {
+      miningText = "No mining resources defined";
+    }
+    resourcesEmbed.addFields({ name: "Mining Resources", value: miningText });
+
+    // Add salvage resources
+    let salvageText = "";
+    if (groupedResources.salvage && groupedResources.salvage.length > 0) {
+      salvageText = groupedResources.salvage
+        .map((r) => `• ${r.name} (${r.value})`)
+        .join("\n");
+    } else {
+      salvageText = "No salvage resources defined";
+    }
+    resourcesEmbed.addFields({ name: "Salvage Resources", value: salvageText });
+
+    // Add haul resources
+    let haulText = "";
+    if (groupedResources.haul && groupedResources.haul.length > 0) {
+      haulText = groupedResources.haul
+        .map((r) => `• ${r.name} (${r.value})`)
+        .join("\n");
+    } else {
+      haulText = "No haul resources defined";
+    }
+    resourcesEmbed.addFields({ name: "Haul Resources", value: haulText });
+
+    // Create button row
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_add_resource")
+        .setLabel("Add Resource")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("admin_remove_resource")
+        .setLabel("Remove Resource")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Reply with the resources embed
+    await interaction.update({
+      embeds: [resourcesEmbed],
+      components: [row],
+    });
+  } catch (error) {
+    console.error("Error in handleResourcesButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading resources. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
   }
-  resourcesEmbed.addFields({ name: "Mining Resources", value: miningText });
-
-  // Add salvage resources
-  let salvageText = "";
-  if (resources.salvage && resources.salvage.length > 0) {
-    salvageText = resources.salvage
-      .map((r) => `• ${r.name} (${r.value})`)
-      .join("\n");
-  } else {
-    salvageText = "No salvage resources defined";
-  }
-  resourcesEmbed.addFields({ name: "Salvage Resources", value: salvageText });
-
-  // Add haul resources
-  let haulText = "";
-  if (resources.haul && resources.haul.length > 0) {
-    haulText = resources.haul.map((r) => `• ${r.name} (${r.value})`).join("\n");
-  } else {
-    haulText = "No haul resources defined";
-  }
-  resourcesEmbed.addFields({ name: "Haul Resources", value: haulText });
-
-  // Create button row
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_add_resource")
-      .setLabel("Add Resource")
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId("admin_remove_resource")
-      .setLabel("Remove Resource")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Reply with the resources embed
-  await interaction.update({
-    embeds: [resourcesEmbed],
-    components: [row],
-  });
 }
 
 // Target Management
 async function handleTargetsButton(interaction) {
-  // Load targets data
-  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+  try {
+    // Get all targets with progress from database
+    const targets = await TargetModel.getAllWithProgress();
 
-  // Create targets embed
-  const targetsEmbed = new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle("Target Management")
-    .setDescription(
-      "Set collection targets or reset progress for specific resources"
-    )
-    .setTimestamp();
+    // Create targets embed
+    const targetsEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("Target Management")
+      .setDescription(
+        "Set collection targets or reset progress for specific resources"
+      )
+      .setTimestamp();
 
-  // Add targets and progress
-  if (Object.keys(targetsData.resources).length === 0) {
-    targetsEmbed.addFields({
-      name: "No Targets Set",
-      value: "Use the buttons below to add new targets",
-    });
-  } else {
-    Object.entries(targetsData.resources).forEach(([key, resourceData]) => {
-      const progress = targetsData.progress[key] || { current: 0 };
-      const percentage = Math.floor(
-        (progress.current / resourceData.target) * 100
-      );
-
-      const resourceName =
-        resourceData.resource.charAt(0).toUpperCase() +
-        resourceData.resource.slice(1);
-      const actionName =
-        resourceData.action.charAt(0).toUpperCase() +
-        resourceData.action.slice(1);
-
+    // Add targets and progress
+    if (targets.length === 0) {
       targetsEmbed.addFields({
-        name: `${actionName} ${resourceName}`,
-        value: `Target: ${resourceData.target} SCU\nCurrent: ${progress.current} SCU (${percentage}%)`,
+        name: "No Targets Set",
+        value: "Use the buttons below to add new targets",
       });
+    } else {
+      for (const target of targets) {
+        const current = target.current_amount || 0;
+        const percentage = Math.floor((current / target.target_amount) * 100);
+
+        const resourceName =
+          target.resource_name ||
+          target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+        const actionName =
+          target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+        targetsEmbed.addFields({
+          name: `${actionName} ${resourceName}`,
+          value: `Target: ${target.target_amount} SCU\nCurrent: ${current} SCU (${percentage}%)`,
+        });
+      }
+    }
+
+    // Create button row
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_add_target")
+        .setLabel("Add Target")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("admin_reset_target")
+        .setLabel("Remove Target")
+        .setStyle(ButtonStyle.Danger),
+      new ButtonBuilder()
+        .setCustomId("admin_reset_progress")
+        .setLabel("Reset Progress")
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Reply with the targets embed
+    await interaction.update({
+      embeds: [targetsEmbed],
+      components: [row],
+    });
+  } catch (error) {
+    console.error("Error in handleTargetsButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading targets. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
     });
   }
-
-  // Create button row
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_add_target")
-      .setLabel("Add Target")
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId("admin_reset_target")
-      .setLabel("Remove Target")
-      .setStyle(ButtonStyle.Danger),
-    new ButtonBuilder()
-      .setCustomId("admin_reset_progress")
-      .setLabel("Reset Progress")
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Reply with the targets embed
-  await interaction.update({
-    embeds: [targetsEmbed],
-    components: [row],
-  });
 }
 
 // Export data
@@ -296,8 +252,8 @@ async function handleExportButton(interaction) {
   await interaction.deferUpdate();
 
   try {
-    // Load targets data
-    const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+    // Get all targets with progress
+    const targets = await TargetModel.getAllWithProgress();
 
     // Create a new workbook
     const workbook = new ExcelJS.Workbook();
@@ -353,25 +309,22 @@ async function handleExportButton(interaction) {
     summarySheet.getColumn("E").width = 15; // Progress
 
     // Add data rows
-    Object.entries(targetsData.resources).forEach(([key, resourceData]) => {
-      const progress = targetsData.progress[key] || { current: 0 };
-      const percentage = Math.floor(
-        (progress.current / resourceData.target) * 100
-      );
+    for (const target of targets) {
+      const current = target.current_amount || 0;
+      const percentage = Math.floor((current / target.target_amount) * 100);
 
       // Capitalize resource and action
       const resourceName =
-        resourceData.resource.charAt(0).toUpperCase() +
-        resourceData.resource.slice(1);
+        target.resource_name ||
+        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
       const actionName =
-        resourceData.action.charAt(0).toUpperCase() +
-        resourceData.action.slice(1);
+        target.action.charAt(0).toUpperCase() + target.action.slice(1);
 
       const row = summarySheet.addRow([
         resourceName,
         actionName,
-        resourceData.target,
-        progress.current,
+        target.target_amount,
+        current,
         `${percentage}%`,
       ]);
 
@@ -402,7 +355,7 @@ async function handleExportButton(interaction) {
           fgColor: { argb: "FF7676" }, // Red
         };
       }
-    });
+    }
 
     // Add border to the table
     const lastRowNum = summarySheet.rowCount;
@@ -469,23 +422,26 @@ async function handleExportButton(interaction) {
     // Collect all contributions
     const allContributions = [];
 
-    Object.entries(targetsData.progress).forEach(([key, progressData]) => {
-      if (!progressData.contributions) return;
+    // Get all contributions
+    for (const target of targets) {
+      const contributions = await ContributionModel.getByTargetId(
+        target.id,
+        1000
+      );
 
-      const [action, ...resourceParts] = key.split("_");
-      const resource = resourceParts.join("_");
-
-      progressData.contributions.forEach((contribution) => {
+      for (const contribution of contributions) {
         allContributions.push({
           timestamp: new Date(contribution.timestamp),
           username: contribution.username,
-          resource: resource.charAt(0).toUpperCase() + resource.slice(1),
-          action: action.charAt(0).toUpperCase() + action.slice(1),
+          resource:
+            target.resource.charAt(0).toUpperCase() + target.resource.slice(1),
+          action:
+            target.action.charAt(0).toUpperCase() + target.action.slice(1),
           amount: contribution.amount,
           location: contribution.location,
         });
-      });
-    });
+      }
+    }
 
     // Sort contributions by timestamp (newest first)
     allContributions.sort((a, b) => b.timestamp - a.timestamp);
@@ -612,6 +568,13 @@ async function handleExportButton(interaction) {
 
     // Save the workbook
     const tempFile = path.join(__dirname, "data", "resource_export.xlsx");
+
+    // Ensure data directory exists
+    const dataDir = path.join(__dirname, "data");
+    if (!fs.existsSync(dataDir)) {
+      fs.mkdirSync(dataDir, { recursive: true });
+    }
+
     await workbook.xlsx.writeFile(tempFile);
 
     // Create attachment
@@ -714,172 +677,209 @@ async function handleExportButton(interaction) {
 
 // Display controls
 async function handleDisplayButton(interaction) {
-  // Load settings
-  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  try {
+    // Load dashboards and settings from database
+    const dashboards = await DashboardModel.getAll();
+    const autoReport = await SettingModel.getAutoReport();
 
-  // Create display embed
-  const displayEmbed = new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle("Display Controls")
-    .setDescription("Configure dashboards and reporting features")
-    .setTimestamp();
+    // Create display embed
+    const displayEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("Display Controls")
+      .setDescription("Configure dashboards and reporting features")
+      .setTimestamp();
 
-  // Add dashboard info
-  const dashboards = settings.dashboards || [];
-  if (dashboards.length === 0) {
-    displayEmbed.addFields({
-      name: "Live Dashboards",
-      value: "No live dashboards currently active",
+    // Add dashboard info
+    if (dashboards.length === 0) {
+      displayEmbed.addFields({
+        name: "Live Dashboards",
+        value: "No live dashboards currently active",
+      });
+    } else {
+      displayEmbed.addFields({
+        name: "Live Dashboards",
+        value: `${dashboards.length} active dashboard${
+          dashboards.length === 1 ? "" : "s"
+        }`,
+      });
+    }
+
+    // Add auto-report info
+    if (autoReport.enabled) {
+      displayEmbed.addFields({
+        name: "Auto Reports",
+        value: `Enabled - Daily reports at ${autoReport.time} UTC in <#${autoReport.channelId}>`,
+      });
+    } else {
+      displayEmbed.addFields({ name: "Auto Reports", value: "Disabled" });
+    }
+
+    // Create button row
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_create_dashboard")
+        .setLabel("Create Dashboard")
+        .setStyle(ButtonStyle.Success),
+      new ButtonBuilder()
+        .setCustomId("admin_auto_report")
+        .setLabel(
+          autoReport.enabled ? "Update Auto Reports" : "Enable Auto Reports"
+        )
+        .setStyle(ButtonStyle.Primary),
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Reply with the display embed
+    await interaction.update({
+      embeds: [displayEmbed],
+      components: [row],
     });
-  } else {
-    displayEmbed.addFields({
-      name: "Live Dashboards",
-      value: `${dashboards.length} active dashboard${
-        dashboards.length === 1 ? "" : "s"
-      }`,
+  } catch (error) {
+    console.error("Error in handleDisplayButton:", error);
+    await interaction.update({
+      content:
+        "An error occurred while loading display settings. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
     });
   }
-
-  // Add auto-report info
-  const autoReport = settings.autoReport || { enabled: false };
-  if (autoReport.enabled) {
-    displayEmbed.addFields({
-      name: "Auto Reports",
-      value: `Enabled - Daily reports at ${autoReport.time} UTC in <#${autoReport.channelId}>`,
-    });
-  } else {
-    displayEmbed.addFields({ name: "Auto Reports", value: "Disabled" });
-  }
-
-  // Create button row
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_create_dashboard")
-      .setLabel("Create Dashboard")
-      .setStyle(ButtonStyle.Success),
-    new ButtonBuilder()
-      .setCustomId("admin_auto_report")
-      .setLabel(
-        autoReport.enabled ? "Update Auto Reports" : "Enable Auto Reports"
-      )
-      .setStyle(ButtonStyle.Primary),
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Reply with the display embed
-  await interaction.update({
-    embeds: [displayEmbed],
-    components: [row],
-  });
 }
 
 // System stats
 async function handleStatsButton(interaction) {
-  // Load data
-  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
-  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
-  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+  try {
+    // Get targets with progress
+    const targets = await TargetModel.getAllWithProgress();
 
-  // Calculate stats
-  const totalTargets = Object.keys(targetsData.resources).length;
-  let totalContributions = 0;
-  let totalAmount = 0;
-  const uniqueUsers = new Set();
-  let lastContribution = null;
+    // Get dashboards
+    const dashboards = await DashboardModel.getAll();
 
-  // Process all contributions
-  Object.entries(targetsData.progress).forEach(([key, progressData]) => {
-    if (!progressData.contributions) return;
+    // Count unique users and total contributions
+    const uniqueUsers = new Set();
+    let totalContributions = 0;
+    let totalAmount = 0;
+    let lastContribution = null;
 
-    totalContributions += progressData.contributions.length;
+    // Process contribution stats
+    for (const target of targets) {
+      const contributions = await ContributionModel.getByTargetId(
+        target.id,
+        1000
+      );
 
-    progressData.contributions.forEach((contribution) => {
-      totalAmount += contribution.amount;
-      uniqueUsers.add(contribution.userId);
+      totalContributions += contributions.length;
 
-      // Find latest contribution
-      if (
-        !lastContribution ||
-        new Date(contribution.timestamp) > new Date(lastContribution.timestamp)
-      ) {
-        lastContribution = contribution;
+      for (const contribution of contributions) {
+        totalAmount += contribution.amount;
+        uniqueUsers.add(contribution.user_id);
+
+        // Find latest contribution
+        if (
+          !lastContribution ||
+          new Date(contribution.timestamp) >
+            new Date(lastContribution.timestamp)
+        ) {
+          lastContribution = contribution;
+        }
       }
+    }
+
+    // Get resource counts by type
+    const resources = await ResourceModel.getGroupedResources();
+    const resourceCounts = {
+      mining: resources.mining ? resources.mining.length : 0,
+      salvage: resources.salvage ? resources.salvage.length : 0,
+      haul: resources.haul ? resources.haul.length : 0,
+    };
+
+    // Create stats embed
+    const statsEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("System Statistics")
+      .setDescription("Current state of Terra Star Expeditionary Bot")
+      .addFields(
+        {
+          name: "Targets",
+          value: `${targets.length} active targets`,
+          inline: true,
+        },
+        {
+          name: "Resources Defined",
+          value: `${
+            resourceCounts.mining + resourceCounts.salvage + resourceCounts.haul
+          } total resources`,
+          inline: true,
+        },
+        {
+          name: "Contributions",
+          value: `${totalContributions} logged contributions`,
+          inline: true,
+        },
+        {
+          name: "Total Amount",
+          value: `${totalAmount} SCU collected`,
+          inline: true,
+        },
+        {
+          name: "Unique Contributors",
+          value: `${uniqueUsers.size} unique users`,
+          inline: true,
+        },
+        {
+          name: "Live Dashboards",
+          value: `${dashboards.length} active`,
+          inline: true,
+        }
+      )
+      .setTimestamp();
+
+    // Add latest contribution if exists
+    if (lastContribution) {
+      const timestamp = new Date(lastContribution.timestamp).toLocaleString();
+      statsEmbed.addFields({
+        name: "Latest Contribution",
+        value: `${lastContribution.username} added ${lastContribution.amount} SCU at ${timestamp}`,
+      });
+    }
+
+    // Create button row
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Reply with the stats embed
+    await interaction.update({
+      embeds: [statsEmbed],
+      components: [row],
     });
-  });
-
-  // Calculate resource counts
-  const resourceCounts = {
-    mining: resources.mining ? resources.mining.length : 0,
-    salvage: resources.salvage ? resources.salvage.length : 0,
-    haul: resources.haul ? resources.haul.length : 0,
-  };
-
-  // Create stats embed
-  const statsEmbed = new EmbedBuilder()
-    .setColor(0x0099ff)
-    .setTitle("System Statistics")
-    .setDescription("Current state of Terra Star Expeditionary Bot")
-    .addFields(
-      {
-        name: "Targets",
-        value: `${totalTargets} active targets`,
-        inline: true,
-      },
-      {
-        name: "Resources Defined",
-        value: `${
-          resourceCounts.mining + resourceCounts.salvage + resourceCounts.haul
-        } total resources`,
-        inline: true,
-      },
-      {
-        name: "Contributions",
-        value: `${totalContributions} logged contributions`,
-        inline: true,
-      },
-      {
-        name: "Total Amount",
-        value: `${totalAmount} SCU collected`,
-        inline: true,
-      },
-      {
-        name: "Unique Contributors",
-        value: `${uniqueUsers.size} unique users`,
-        inline: true,
-      },
-      {
-        name: "Live Dashboards",
-        value: `${settings.dashboards ? settings.dashboards.length : 0} active`,
-        inline: true,
-      }
-    )
-    .setTimestamp();
-
-  // Add latest contribution if exists
-  if (lastContribution) {
-    const timestamp = new Date(lastContribution.timestamp).toLocaleString();
-    statsEmbed.addFields({
-      name: "Latest Contribution",
-      value: `${lastContribution.username} added ${lastContribution.amount} SCU at ${timestamp}`,
+  } catch (error) {
+    console.error("Error in handleStatsButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading statistics. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
     });
   }
-
-  // Create button row
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Reply with the stats embed
-  await interaction.update({
-    embeds: [statsEmbed],
-    components: [row],
-  });
 }
 
 // Back button handler
@@ -927,7 +927,6 @@ async function handleBackButton(interaction) {
       .setLabel("Target Management")
       .setStyle(ButtonStyle.Primary)
   );
-
   const row2 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("admin_export")
@@ -974,35 +973,51 @@ async function handleAddResourceButton(interaction) {
 
 // Remove resource button handler
 async function handleRemoveResourceButton(interaction) {
-  // Load resources
-  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+  try {
+    // Load grouped resources from database
+    const groupedResources = await ResourceModel.getGroupedResources();
 
-  // Create select menu for resource selection
-  const row1 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("admin_remove_resource_action")
-      .setPlaceholder("Select action type")
-      .addOptions([
-        { label: "Mining Resource", value: "mining" },
-        { label: "Salvage Resource", value: "salvage" },
-        { label: "Hauling Resource", value: "haul" },
-      ])
-  );
+    // Create select menu for resource selection
+    const row1 = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_remove_resource_action")
+        .setPlaceholder("Select action type")
+        .addOptions([
+          { label: "Mining Resource", value: "mining" },
+          { label: "Salvage Resource", value: "salvage" },
+          { label: "Hauling Resource", value: "haul" },
+        ])
+    );
 
-  // Back button
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
+    // Back button
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
 
-  // Update the message
-  await interaction.update({
-    content: "Select the action type for the resource you want to remove:",
-    embeds: [],
-    components: [row1, row2],
-  });
+    // Update the message
+    await interaction.update({
+      content: "Select the action type for the resource you want to remove:",
+      embeds: [],
+      components: [row1, row2],
+    });
+  } catch (error) {
+    console.error("Error in handleRemoveResourceButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading resources. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
 }
 
 // Add target button handler
@@ -1029,13 +1044,67 @@ async function handleAddTargetButton(interaction) {
 
 // Reset target button handler
 async function handleResetTargetButton(interaction) {
-  // Load targets data
-  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+  try {
+    // Get all targets with progress
+    const targets = await TargetModel.getAllWithProgress();
 
-  // Check if there are any targets
-  if (Object.keys(targetsData.resources).length === 0) {
-    return interaction.update({
-      content: "There are no targets to reset.",
+    // Check if there are any targets
+    if (targets.length === 0) {
+      return interaction.update({
+        content: "There are no targets to reset.",
+        embeds: [],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Create select menu options for targets
+    const options = targets.map((target) => {
+      const resourceName =
+        target.resource_name ||
+        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+      const actionName =
+        target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+      return {
+        label: `${actionName} ${resourceName}`,
+        value: target.id.toString(),
+        description: `Target: ${target.target_amount} SCU`,
+      };
+    });
+
+    // Create select menu
+    const row1 = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_reset_target_select")
+        .setPlaceholder("Select target to remove")
+        .addOptions(options)
+    );
+
+    // Back button
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Update the message
+    await interaction.update({
+      content: "Select the target you want to remove:",
+      embeds: [],
+      components: [row1, row2],
+    });
+  } catch (error) {
+    console.error("Error in handleResetTargetButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading targets. Please try again.",
       embeds: [],
       components: [
         new ActionRowBuilder().addComponents(
@@ -1047,56 +1116,73 @@ async function handleResetTargetButton(interaction) {
       ],
     });
   }
-
-  // Create select menu options for targets
-  const options = Object.entries(targetsData.resources).map(
-    ([key, resource]) => {
-      const resourceName =
-        resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
-      const actionName =
-        resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
-
-      return {
-        label: `${actionName} ${resourceName}`,
-        value: key,
-        description: `Target: ${resource.target} SCU`,
-      };
-    }
-  );
-
-  // Create select menu
-  const row1 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("admin_reset_target_select")
-      .setPlaceholder("Select target to remove")
-      .addOptions(options)
-  );
-
-  // Back button
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Update the message
-  await interaction.update({
-    content: "Select the target you want to remove:",
-    embeds: [],
-    components: [row1, row2],
-  });
 }
 
 // Reset progress button handler
 async function handleResetProgressButton(interaction) {
-  // Load targets data
-  const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+  try {
+    // Get all targets with progress
+    const targets = await TargetModel.getAllWithProgress();
 
-  // Check if there are any targets
-  if (Object.keys(targetsData.resources).length === 0) {
-    return interaction.update({
-      content: "There are no targets to reset progress for.",
+    // Check if there are any targets
+    if (targets.length === 0) {
+      return interaction.update({
+        content: "There are no targets to reset progress for.",
+        embeds: [],
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Create select menu options for targets
+    const options = targets.map((target) => {
+      const resourceName =
+        target.resource_name ||
+        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+      const actionName =
+        target.action.charAt(0).toUpperCase() + target.action.slice(1);
+      const current = target.current_amount || 0;
+
+      return {
+        label: `${actionName} ${resourceName}`,
+        value: target.id.toString(),
+        description: `Current Progress: ${current}/${target.target_amount} SCU`,
+      };
+    });
+
+    // Create select menu
+    const row1 = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_reset_progress_select")
+        .setPlaceholder("Select target to reset progress")
+        .addOptions(options)
+    );
+
+    // Back button
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Update the message
+    await interaction.update({
+      content:
+        "Select the target to reset progress for (this will keep the target but reset all progress to 0):",
+      embeds: [],
+      components: [row1, row2],
+    });
+  } catch (error) {
+    console.error("Error in handleResetProgressButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading targets. Please try again.",
       embeds: [],
       components: [
         new ActionRowBuilder().addComponents(
@@ -1108,47 +1194,6 @@ async function handleResetProgressButton(interaction) {
       ],
     });
   }
-
-  // Create select menu options for targets
-  const options = Object.entries(targetsData.resources).map(
-    ([key, resource]) => {
-      const resourceName =
-        resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
-      const actionName =
-        resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
-      const progress = targetsData.progress[key] || { current: 0 };
-
-      return {
-        label: `${actionName} ${resourceName}`,
-        value: key,
-        description: `Current Progress: ${progress.current}/${resource.target} SCU`,
-      };
-    }
-  );
-
-  // Create select menu
-  const row1 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("admin_reset_progress_select")
-      .setPlaceholder("Select target to reset progress")
-      .addOptions(options)
-  );
-
-  // Back button
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Update the message
-  await interaction.update({
-    content:
-      "Select the target to reset progress for (this will keep the target but reset all progress to 0):",
-    embeds: [],
-    components: [row1, row2],
-  });
 }
 
 // Create dashboard button handler
@@ -1176,58 +1221,73 @@ async function handleCreateDashboardButton(interaction) {
 
 // Auto report button handler
 async function handleAutoReportButton(interaction) {
-  // Load settings
-  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-  const autoReport = settings.autoReport || { enabled: false };
+  try {
+    // Load auto report settings from database
+    const autoReport = await SettingModel.getAutoReport();
 
-  // Create modal for auto-report settings
-  const modal = new ModalBuilder()
-    .setCustomId("admin_auto_report_modal")
-    .setTitle("Configure Auto Reports");
+    // Create modal for auto-report settings
+    const modal = new ModalBuilder()
+      .setCustomId("admin_auto_report_modal")
+      .setTitle("Configure Auto Reports");
 
-  // Add input field for channel ID
-  const channelInput = new TextInputBuilder()
-    .setCustomId("auto_report_channel")
-    .setLabel("Channel ID")
-    .setPlaceholder("Enter the ID of the channel for reports")
-    .setValue(autoReport.channelId || "")
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
+    // Add input field for channel ID
+    const channelInput = new TextInputBuilder()
+      .setCustomId("auto_report_channel")
+      .setLabel("Channel ID")
+      .setPlaceholder("Enter the ID of the channel for reports")
+      .setValue(autoReport.channelId || "")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
 
-  // Add input field for time
-  const timeInput = new TextInputBuilder()
-    .setCustomId("auto_report_time")
-    .setLabel("Time (24h format, UTC)")
-    .setPlaceholder("Enter time in 24h format (e.g., 08:00 or 20:30)")
-    .setValue(autoReport.time || "")
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
+    // Add input field for time
+    const timeInput = new TextInputBuilder()
+      .setCustomId("auto_report_time")
+      .setLabel("Time (24h format, UTC)")
+      .setPlaceholder("Enter time in 24h format (e.g., 08:00 or 20:30)")
+      .setValue(autoReport.time || "")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
 
-  // Add field for enabled/disabled
-  const enabledInput = new TextInputBuilder()
-    .setCustomId("auto_report_enabled")
-    .setLabel("Enable reports (true/false)")
-    .setPlaceholder('Type "true" to enable, "false" to disable')
-    .setValue(autoReport.enabled ? "true" : "false")
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
+    // Add field for enabled/disabled
+    const enabledInput = new TextInputBuilder()
+      .setCustomId("auto_report_enabled")
+      .setLabel("Enable reports (true/false)")
+      .setPlaceholder('Type "true" to enable, "false" to disable')
+      .setValue(autoReport.enabled ? "true" : "false")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
 
-  // Add rows and fields to modal
-  const firstActionRow = new ActionRowBuilder().addComponents(channelInput);
-  const secondActionRow = new ActionRowBuilder().addComponents(timeInput);
-  const thirdActionRow = new ActionRowBuilder().addComponents(enabledInput);
-  modal.addComponents(firstActionRow, secondActionRow, thirdActionRow);
+    // Add rows and fields to modal
+    const firstActionRow = new ActionRowBuilder().addComponents(channelInput);
+    const secondActionRow = new ActionRowBuilder().addComponents(timeInput);
+    const thirdActionRow = new ActionRowBuilder().addComponents(enabledInput);
+    modal.addComponents(firstActionRow, secondActionRow, thirdActionRow);
 
-  // Show the modal
-  await interaction.showModal(modal);
+    // Show the modal
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Error in handleAutoReportButton:", error);
+    await interaction.update({
+      content:
+        "An error occurred while loading auto report settings. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
 }
 
 // Handle select menu interactions for admin functions
 async function handleAdminSelectMenuInteraction(interaction) {
   // Verify admin permissions again
   if (!interaction.member.permissions.has("Administrator")) {
-    await interaction.deferReply({ ephemeral: true });
-    return interaction.editReply({
+    return interaction.reply({
       content: "You do not have permission to use admin controls.",
       ephemeral: true,
     });
@@ -1297,16 +1357,58 @@ async function handleResourceActionSelect(interaction, actionType) {
 
 // Handle remove resource action selection
 async function handleRemoveResourceActionSelect(interaction, actionType) {
-  // Load resources
-  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+  try {
+    // Get resources for this action type
+    const resources = await ResourceModel.getByActionType(actionType);
 
-  // Get resources for the selected action type
-  const actionResources = resources[actionType] || [];
+    // Check if there are resources to remove
+    if (resources.length === 0) {
+      return interaction.update({
+        content: `There are no ${actionType} resources to remove.`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
 
-  // Check if there are resources to remove
-  if (actionResources.length === 0) {
-    return interaction.update({
-      content: `There are no ${actionType} resources to remove.`,
+    // Create select menu options for resources
+    const options = resources.map((resource) => ({
+      label: resource.name,
+      value: resource.value,
+      description: `Remove ${resource.name} (${resource.value})`,
+    }));
+
+    // Create select menu
+    const row1 = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_remove_resource_select")
+        .setPlaceholder(`Select ${actionType} resource to remove`)
+        .addOptions(options)
+    );
+
+    // Back button
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Update the message
+    await interaction.update({
+      content: `Select the ${actionType} resource you want to remove:`,
+      components: [row1, row2],
+    });
+  } catch (error) {
+    console.error("Error in handleRemoveResourceActionSelect:", error);
+    await interaction.update({
+      content: "An error occurred while loading resources. Please try again.",
+      embeds: [],
       components: [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -1317,57 +1419,70 @@ async function handleRemoveResourceActionSelect(interaction, actionType) {
       ],
     });
   }
-
-  // Create select menu options for resources
-  const options = actionResources.map((resource) => ({
-    label: resource.name,
-    value: resource.value,
-    description: `Remove ${resource.name} (${resource.value})`,
-  }));
-
-  // Create select menu
-  const row1 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("admin_remove_resource_select")
-      .setPlaceholder(`Select ${actionType} resource to remove`)
-      .addOptions(options)
-  );
-
-  // Back button
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Update the message
-  await interaction.update({
-    content: `Select the ${actionType} resource you want to remove:`,
-    components: [row1, row2],
-  });
 }
 
 // Handle target action selection for new target
 async function handleTargetActionSelect(interaction, actionType) {
-  // Load resources
-  const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+  try {
+    // Map action type to resource category
+    const resourceCategory =
+      actionType === "mine"
+        ? "mining"
+        : actionType === "salvage"
+        ? "salvage"
+        : "haul";
 
-  // Map action type to resource category
-  const resourceCategory =
-    actionType === "mine"
-      ? "mining"
-      : actionType === "salvage"
-      ? "salvage"
-      : "haul";
+    // Get resources for the action type
+    const resources = await ResourceModel.getByActionType(resourceCategory);
 
-  // Get resources for the action type
-  const actionResources = resources[resourceCategory] || [];
+    // Check if there are resources available
+    if (resources.length === 0) {
+      return interaction.update({
+        content: `There are no resources defined for ${actionType} action. Please add resources first.`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
 
-  // Check if there are resources available
-  if (actionResources.length === 0) {
-    return interaction.update({
-      content: `There are no resources defined for ${actionType} action. Please add resources first.`,
+    // Create select menu options for resources
+    const options = resources.map((resource) => ({
+      label: resource.name,
+      value: resource.value,
+      description: `${resource.name} (${resource.value})`,
+    }));
+
+    // Create select menu
+    const row1 = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_add_target_resource")
+        .setPlaceholder(`Select ${actionType} resource`)
+        .addOptions(options)
+    );
+
+    // Back button
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    // Update the message
+    await interaction.update({
+      content: `Select the resource for the new ${actionType} target:`,
+      components: [row1, row2],
+    });
+  } catch (error) {
+    console.error("Error in handleTargetActionSelect:", error);
+    await interaction.update({
+      content: "An error occurred while loading resources. Please try again.",
+      embeds: [],
       components: [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -1378,69 +1493,41 @@ async function handleTargetActionSelect(interaction, actionType) {
       ],
     });
   }
-
-  // Create select menu options for resources
-  const options = actionResources.map((resource) => ({
-    label: resource.name,
-    value: resource.value,
-    description: `${resource.name} (${resource.value})`,
-  }));
-
-  // Create select menu
-  const row1 = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("admin_add_target_resource")
-      .setPlaceholder(`Select ${actionType} resource`)
-      .addOptions(options)
-  );
-
-  // Store action type in a hidden field
-  const hiddenActionType = new TextInputBuilder()
-    .setCustomId("hidden_action_type")
-    .setValue(actionType);
-
-  // Back button
-  const row2 = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId("admin_back")
-      .setLabel("Back to Admin")
-      .setStyle(ButtonStyle.Secondary)
-  );
-
-  // Update the message
-  await interaction.update({
-    content: `Select the resource for the new ${actionType} target:`,
-    components: [row1, row2],
-  });
 }
 
 // Handle reset target selection
-async function handleResetTargetSelect(interaction, targetKey) {
+async function handleResetTargetSelect(interaction, targetId) {
   try {
-    // Load targets data
-    const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+    // Get target details
+    const target = await TargetModel.getById(targetId);
 
-    // Get resource info
-    const resource = targetsData.resources[targetKey];
-    if (!resource) {
+    if (!target) {
       throw new Error("Target not found");
     }
 
-    // Remove target and progress
-    delete targetsData.resources[targetKey];
-    delete targetsData.progress[targetKey];
+    // Delete the target
+    await TargetModel.delete(targetId);
 
-    // Save updated data
-    fs.writeFileSync(targetsPath, JSON.stringify(targetsData, null, 2), "utf8");
+    // Get resource name
+    const resourceCategory =
+      target.action === "mine"
+        ? "mining"
+        : target.action === "salvage"
+        ? "salvage"
+        : "haul";
+
+    const resource = await ResourceModel.getByValueAndType(
+      target.resource,
+      resourceCategory
+    );
+    const resourceName = resource
+      ? resource.name
+      : target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+    const actionName =
+      target.action.charAt(0).toUpperCase() + target.action.slice(1);
 
     // Update dashboards
     await updateDashboards(interaction.client);
-
-    // Get resource and action names
-    const resourceName =
-      resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
-    const actionName =
-      resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
 
     // Success message
     await interaction.update({
@@ -1476,38 +1563,42 @@ async function handleResetTargetSelect(interaction, targetKey) {
 }
 
 // Handle reset progress selection
-async function handleResetProgressSelect(interaction, targetKey) {
+async function handleResetProgressSelect(interaction, targetId) {
   try {
-    // Load targets data
-    const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
+    // Get target details
+    const target = await TargetModel.getById(targetId);
 
-    // Get resource info
-    const resource = targetsData.resources[targetKey];
-    if (!resource) {
+    if (!target) {
       throw new Error("Target not found");
     }
 
-    // Reset progress but keep target
-    targetsData.progress[targetKey] = {
-      current: 0,
-      contributions: [],
-    };
+    // Reset progress for the target
+    await TargetModel.resetProgress(targetId);
 
-    // Save updated data
-    fs.writeFileSync(targetsPath, JSON.stringify(targetsData, null, 2), "utf8");
+    // Get resource name
+    const resourceCategory =
+      target.action === "mine"
+        ? "mining"
+        : target.action === "salvage"
+        ? "salvage"
+        : "haul";
+
+    const resource = await ResourceModel.getByValueAndType(
+      target.resource,
+      resourceCategory
+    );
+    const resourceName = resource
+      ? resource.name
+      : target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+    const actionName =
+      target.action.charAt(0).toUpperCase() + target.action.slice(1);
 
     // Update dashboards
     await updateDashboards(interaction.client);
 
-    // Get resource and action names
-    const resourceName =
-      resource.resource.charAt(0).toUpperCase() + resource.resource.slice(1);
-    const actionName =
-      resource.action.charAt(0).toUpperCase() + resource.action.slice(1);
-
     // Success message
     await interaction.update({
-      content: `Successfully reset progress for ${actionName} ${resourceName}. Progress is now 0/${resource.target} SCU.`,
+      content: `Successfully reset progress for ${actionName} ${resourceName}. Progress is now 0/${target.target_amount} SCU.`,
       components: [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder()
@@ -1540,45 +1631,39 @@ async function handleResetProgressSelect(interaction, targetKey) {
 
 // Handle resource selection for removal
 async function handleRemoveResourceSelect(interaction, resourceValue) {
-  // Get action type from message content
-  const content = interaction.message.content;
-  const actionMatch = content.match(/Select the (\w+) resource/);
-
-  if (!actionMatch) {
-    return interaction.update({
-      content: "Error: Could not determine action type",
-      components: [
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder()
-            .setCustomId("admin_back")
-            .setLabel("Back to Admin")
-            .setStyle(ButtonStyle.Secondary)
-        ),
-      ],
-    });
-  }
-
-  const actionType = actionMatch[1];
-
   try {
-    // Load resources
-    const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+    // Get action type from message content
+    const content = interaction.message.content;
+    const actionMatch = content.match(/Select the (\w+) resource/);
+
+    if (!actionMatch) {
+      return interaction.update({
+        content: "Error: Could not determine action type",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const actionType = actionMatch[1];
 
     // Find the resource
-    const resource = resources[actionType].find(
-      (r) => r.value === resourceValue
+    const resource = await ResourceModel.getByValueAndType(
+      resourceValue,
+      actionType
     );
+
     if (!resource) {
       throw new Error("Resource not found");
     }
 
     // Remove the resource
-    resources[actionType] = resources[actionType].filter(
-      (r) => r.value !== resourceValue
-    );
-
-    // Save updated resources
-    fs.writeFileSync(resourcesPath, JSON.stringify(resources, null, 2), "utf8");
+    await ResourceModel.remove(resourceValue, actionType);
 
     // Success message
     await interaction.update({
@@ -1635,14 +1720,12 @@ async function handleAddTargetResourceSelect(interaction, resourceValue) {
   // Show the modal
   await interaction.showModal(modal);
 }
-// This should replace the existing code in the handleAdminModalSubmit function
-// in src/admin-handlers.js for handling target creation modals
 
+// Handle modal submissions for admin functions
 async function handleAdminModalSubmit(interaction) {
   // Verify admin permissions again
   if (!interaction.member.permissions.has("Administrator")) {
-    await interaction.deferReply({ ephemeral: true });
-    return interaction.editReply({
+    return interaction.reply({
       content: "You do not have permission to use admin controls.",
       ephemeral: true,
     });
@@ -1660,33 +1743,11 @@ async function handleAdminModalSubmit(interaction) {
       .replace(/\s+/g, "_");
 
     try {
-      // Load resources
-      const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
-
-      // Ensure the action type exists
-      if (!resources[actionType]) {
-        resources[actionType] = [];
-      }
-
-      // Check if resource already exists
-      if (resources[actionType].some((r) => r.value === value)) {
-        throw new Error(`Resource with value "${value}" already exists`);
-      }
-
-      // Add the new resource
-      resources[actionType].push({ name, value });
-
-      // Save updated resources
-      fs.writeFileSync(
-        resourcesPath,
-        JSON.stringify(resources, null, 2),
-        "utf8"
-      );
-
-      await interaction.deferReply({ ephemeral: true });
+      // Add resource to database
+      await ResourceModel.add(name, value, actionType);
 
       // Success message
-      await interaction.editReply({
+      await interaction.reply({
         content: `Successfully added ${name} (${value}) to ${actionType} resources.`,
         ephemeral: true,
         components: [
@@ -1705,9 +1766,7 @@ async function handleAdminModalSubmit(interaction) {
     } catch (error) {
       console.error("Error adding resource:", error);
 
-      await interaction.deferReply({ ephemeral: true });
-
-      await interaction.editReply({
+      await interaction.reply({
         content: `Error adding resource: ${error.message}`,
         ephemeral: true,
         components: [
@@ -1723,38 +1782,49 @@ async function handleAdminModalSubmit(interaction) {
   } else if (modalId.startsWith("admin_add_target_modal_")) {
     // Add new target
     const resourceKey = modalId.replace("admin_add_target_modal_", "");
-    const amount = parseInt(
-      interaction.fields.getTextInputValue("target_amount")
-    );
 
     // First, acknowledge the interaction to prevent timeout
     await interaction.deferReply({ ephemeral: true });
 
-    // Get action type from message content
-    const content = interaction.message.content;
-    const actionMatch = content.match(
-      /Select the resource for the new (\w+) target/
-    );
-
-    if (!actionMatch) {
-      return interaction.editReply({
-        content: "Error: Could not determine action type",
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId("admin_back")
-              .setLabel("Back to Admin")
-              .setStyle(ButtonStyle.Secondary)
-          ),
-        ],
-      });
-    }
-
-    const action = actionMatch[1];
-
     try {
-      // Load resources to get the resource name
-      const resources = JSON.parse(fs.readFileSync(resourcesPath, "utf8"));
+      // Get action type from message content
+      const content = interaction.message.content;
+      const actionMatch = content.match(
+        /Select the resource for the new (\w+) target/
+      );
+
+      if (!actionMatch) {
+        return interaction.editReply({
+          content: "Error: Could not determine action type",
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId("admin_back")
+                .setLabel("Back to Admin")
+                .setStyle(ButtonStyle.Secondary)
+            ),
+          ],
+        });
+      }
+
+      const action = actionMatch[1];
+      const amount = parseInt(
+        interaction.fields.getTextInputValue("target_amount")
+      );
+
+      if (isNaN(amount) || amount <= 0) {
+        return interaction.editReply({
+          content: "Invalid amount. Please enter a positive number.",
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId("admin_back")
+                .setLabel("Back to Admin")
+                .setStyle(ButtonStyle.Secondary)
+            ),
+          ],
+        });
+      }
 
       // Map action to resource category
       const resourceCategory =
@@ -1765,62 +1835,68 @@ async function handleAdminModalSubmit(interaction) {
           : "haul";
 
       // Find the resource
-      const resourceInfo = resources[resourceCategory].find(
-        (r) => r.value === resourceKey
+      const resource = await ResourceModel.getByValueAndType(
+        resourceKey,
+        resourceCategory
       );
-      if (!resourceInfo) {
+
+      if (!resource) {
         throw new Error("Resource not found");
       }
 
-      // Load targets data
-      const targetsData = JSON.parse(fs.readFileSync(targetsPath, "utf8"));
-
-      // Create the target key
-      const targetKey = `${action}_${resourceKey}`;
-
-      // Set the target
-      targetsData.resources[targetKey] = {
+      // Check if target already exists
+      const existingTarget = await TargetModel.getByActionAndResource(
         action,
-        resource: resourceKey,
-        target: amount,
-        createdAt: new Date().toISOString(),
-        createdBy: interaction.user.id,
-      };
-
-      // Initialize progress if it doesn't exist
-      if (!targetsData.progress[targetKey]) {
-        targetsData.progress[targetKey] = {
-          current: 0,
-          contributions: [],
-        };
-      }
-
-      // Save updated targets
-      fs.writeFileSync(
-        targetsPath,
-        JSON.stringify(targetsData, null, 2),
-        "utf8"
+        resourceKey
       );
+
+      if (existingTarget) {
+        // Update existing target
+        await TargetModel.updateAmount(existingTarget.id, amount);
+
+        await interaction.editReply({
+          content: `Updated existing target: ${action} ${amount} SCU of ${resource.name}`,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId("admin_targets")
+                .setLabel("Back to Targets")
+                .setStyle(ButtonStyle.Primary),
+              new ButtonBuilder()
+                .setCustomId("admin_back")
+                .setLabel("Back to Admin")
+                .setStyle(ButtonStyle.Secondary)
+            ),
+          ],
+        });
+      } else {
+        // Create new target
+        await TargetModel.create(
+          action,
+          resourceKey,
+          amount,
+          interaction.user.id
+        );
+
+        await interaction.editReply({
+          content: `Successfully set target: ${action} ${amount} SCU of ${resource.name}`,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId("admin_targets")
+                .setLabel("Back to Targets")
+                .setStyle(ButtonStyle.Primary),
+              new ButtonBuilder()
+                .setCustomId("admin_back")
+                .setLabel("Back to Admin")
+                .setStyle(ButtonStyle.Secondary)
+            ),
+          ],
+        });
+      }
 
       // Update dashboards
       await updateDashboards(interaction.client);
-
-      // Success message
-      await interaction.editReply({
-        content: `Successfully set target: ${action} ${amount} SCU of ${resourceInfo.name}`,
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId("admin_targets")
-              .setLabel("Back to Targets")
-              .setStyle(ButtonStyle.Primary),
-            new ButtonBuilder()
-              .setCustomId("admin_back")
-              .setLabel("Back to Admin")
-              .setStyle(ButtonStyle.Secondary)
-          ),
-        ],
-      });
     } catch (error) {
       console.error("Error adding target:", error);
 
@@ -1858,15 +1934,13 @@ async function handleAdminModalSubmit(interaction) {
       const options = {
         getChannel: () => channel,
       };
-
       // Create a mock interaction
       const mockInteraction = {
         ...interaction,
         options,
         deferReply: async () => {},
         editReply: async (data) => {
-          await interaction.deferReply({ ephemeral: true });
-          await interaction.editReply({
+          await interaction.reply({
             content: "Dashboard created successfully!",
             ephemeral: true,
             components: [
@@ -1890,8 +1964,7 @@ async function handleAdminModalSubmit(interaction) {
     } catch (error) {
       console.error("Error creating dashboard:", error);
 
-      await interaction.deferReply({ ephemeral: true });
-      await interaction.editReply({
+      await interaction.reply({
         content: `Error creating dashboard: ${error.message}`,
         ephemeral: true,
         components: [
@@ -1918,8 +1991,7 @@ async function handleAdminModalSubmit(interaction) {
     // Validate time format (24h: HH:MM)
     const timeRegex = /^([01]?[0-9]|2[0-3]):([0-5][0-9])$/;
     if (!timeRegex.test(time)) {
-        await interaction.deferReply({ ephemeral: true });
-      return interaction.editReply({
+      return interaction.reply({
         content:
           "Invalid time format. Please use 24h format (e.g., 08:00 or 20:30).",
         ephemeral: true,
@@ -1942,28 +2014,19 @@ async function handleAdminModalSubmit(interaction) {
         throw new Error("Channel not found");
       }
 
-      // Load settings
-      let settings = {};
-      if (fs.existsSync(settingsPath)) {
-        settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
-      }
-
-      // Update auto report settings
-      settings.autoReport = {
+      // Update auto report settings in database
+      const autoReportSettings = {
         enabled,
         channelId,
         time,
         guildId: interaction.guild.id,
-        lastReportDate: settings.autoReport?.lastReportDate || null,
+        lastReportDate: null, // Reset last report date to ensure next report runs
       };
 
-      // Save settings
-      fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), "utf8");
-      
-      await interaction.deferReply({ ephemeral: true });
+      await SettingModel.setAutoReport(autoReportSettings);
 
       // Success message
-      await interaction.editReply({
+      await interaction.reply({
         content: `Auto reports ${enabled ? "enabled" : "disabled"}. ${
           enabled
             ? `Reports will be posted in <#${channelId}> at ${time} UTC.`
@@ -1986,8 +2049,7 @@ async function handleAdminModalSubmit(interaction) {
     } catch (error) {
       console.error("Error configuring auto reports:", error);
 
-      await interaction.deferReply({ ephemeral: true });
-      await interaction.editReply({
+      await interaction.reply({
         content: `Error configuring auto reports: ${error.message}`,
         ephemeral: true,
         components: [

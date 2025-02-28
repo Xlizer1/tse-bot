@@ -27,6 +27,10 @@
     {
       "name": "Aluminum",
       "value": "aluminum"
+    },
+    {
+      "name": "Jelly",
+      "value": "jelly"
     }
   ],
   "salvage": [
