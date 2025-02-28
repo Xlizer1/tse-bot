@@ -1,65 +1,147 @@
-// src/dashboard-updater.js
 const { EmbedBuilder } = require('discord.js');
 const TargetModel = require('./models/target');
 const ContributionModel = require('./models/contribution');
 const ResourceModel = require('./models/resource');
 const { DashboardModel } = require('./models/dashboard');
 
+// Create emoji-based visuals for progress
+function createProgressBar(percentage, length = 10) {
+  const filledLength = Math.round((percentage / 100) * length);
+  const emptyLength = length - filledLength;
+  
+  const filledEmoji = '🟦'; // Blue square for filled
+  const emptyEmoji = '⬜'; // White square for empty
+  
+  return filledEmoji.repeat(filledLength) + emptyEmoji.repeat(emptyLength);
+}
+
+// Generate insights and stats
+async function generateDashboardInsights() {
+  try {
+    // Get all targets
+    const targets = await TargetModel.getAllWithProgress();
+    const resources = await ResourceModel.getAll();
+    const topContributors = await ContributionModel.getTopContributors(3);
+
+    // Calculate overall stats
+    const totalTargets = targets.length;
+    const uniqueResourceTypes = new Set(targets.map(t => t.resource)).size;
+    const totalContributions = targets.reduce((sum, target) => sum + (target.current_amount || 0), 0);
+    const totalTargetAmount = targets.reduce((sum, target) => sum + target.target_amount, 0);
+    const overallProgress = Math.floor((totalContributions / totalTargetAmount) * 100);
+
+    // Resource type breakdown
+    const resourceBreakdown = targets.reduce((acc, target) => {
+      const action = target.action;
+      if (!acc[action]) acc[action] = { total: 0, current: 0 };
+      acc[action].total += target.target_amount;
+      acc[action].current += (target.current_amount || 0);
+      return acc;
+    }, {});
+
+    // Closest to completion and furthest from completion
+    const sortedTargets = targets
+      .map(target => ({
+        ...target,
+        percentage: Math.floor(((target.current_amount || 0) / target.target_amount) * 100)
+      }))
+      .sort((a, b) => b.percentage - a.percentage);
+
+    // Prepare insights
+    const insights = {
+      totalTargets,
+      uniqueResourceTypes,
+      totalContributions,
+      overallProgress,
+      progressBar: createProgressBar(overallProgress),
+      resourceBreakdown: Object.entries(resourceBreakdown).map(([action, data]) => ({
+        action,
+        percentage: Math.floor((data.current / data.total) * 100),
+        progressBar: createProgressBar(Math.floor((data.current / data.total) * 100))
+      })),
+      closestTarget: sortedTargets[0],
+      furthestTarget: sortedTargets[sortedTargets.length - 1],
+      topContributors
+    };
+
+    return insights;
+  } catch (error) {
+    console.error('Error generating dashboard insights:', error);
+    return null;
+  }
+}
+
 // Create a progress embed based on targets
 async function createProgressEmbed() {
   const embed = new EmbedBuilder()
     .setColor(0x0099FF)
-    .setTitle('Resource Collection Progress')
-    .setDescription('Current progress towards resource targets')
+    .setTitle('🚀 Terra Star Expeditionary Dashboard')
     .setTimestamp();
   
   try {
-    // Get all targets with progress
-    const targets = await TargetModel.getAllWithProgress();
+    const insights = await generateDashboardInsights();
     
-    // Check if there are any targets
-    if (targets.length === 0) {
-      embed.setDescription('No resource targets have been set yet. Ask an admin to set targets using the /settarget command.');
+    if (!insights) {
+      embed.setDescription('Unable to generate dashboard insights at this time.');
       return embed;
     }
-    
-    // Add progress for each resource
-    for (const target of targets) {
-      const current = target.current_amount || 0;
-      const percentage = Math.floor((current / target.target_amount) * 100);
-      
-      // Create progress bar
-      const barLength = 15;
-      const filledChars = Math.round((percentage / 100) * barLength);
-      const progressBar = '█'.repeat(filledChars) + '░'.repeat(barLength - filledChars);
-      
-      // Get last contributor if any
-      let lastContributor = 'No contributions yet';
-      
-      const latestContribution = await ContributionModel.getLatestForTarget(target.id);
-      
-      if (latestContribution) {
-        const date = new Date(latestContribution.timestamp);
-        const timeString = date.toLocaleString();
-        
-        lastContributor = `Last: ${latestContribution.username} added ${latestContribution.amount} SCU (${timeString})`;
+
+    // Construct detailed description
+    const description = [
+      `**📊 Overall Progress**: ${insights.progressBar} ${insights.overallProgress}%`,
+      `**🎯 Total Targets**: ${insights.totalTargets}`,
+      `**💎 Unique Resource Types**: ${insights.uniqueResourceTypes}`,
+      `**📦 Total Contributions**: ${insights.totalContributions} SCU`
+    ].join('\n');
+
+    embed.setDescription(description);
+
+    // Resource Breakdown
+    const resourceBreakdownField = insights.resourceBreakdown.map(rb => 
+      `**${rb.action.charAt(0).toUpperCase() + rb.action.slice(1)}**: ${rb.progressBar} ${rb.percentage}%`
+    ).join('\n');
+
+    embed.addFields(
+      { 
+        name: '📈 Resource Type Breakdown', 
+        value: resourceBreakdownField 
       }
-      
-      // Capitalize resource and action names
-      const resourceName = target.resource_name || 
-                          (target.resource.charAt(0).toUpperCase() + target.resource.slice(1));
-      const actionName = target.action.charAt(0).toUpperCase() + target.action.slice(1);
-      
-      embed.addFields({
-        name: `${actionName} ${resourceName}`,
-        value: `${progressBar} ${current}/${target.target_amount} SCU (${percentage}%)\n${lastContributor}`
-      });
+    );
+
+    // Top Contributors
+    if (insights.topContributors && insights.topContributors.length > 0) {
+      const topContributorsField = insights.topContributors.map((contributor, index) => 
+        `${index === 0 ? '🥇' : index === 1 ? '🥈' : '🥉'} ${contributor.username}: ${contributor.total_amount} SCU`
+      ).join('\n');
+
+      embed.addFields(
+        { 
+          name: '🏆 Top Contributors', 
+          value: topContributorsField 
+        }
+      );
     }
-    
+
+    // Targets Insights
+    if (insights.closestTarget && insights.furthestTarget) {
+      const targetsInsight = [
+        `**🎉 Closest Target**: ${insights.closestTarget.resource_name || insights.closestTarget.resource} (${insights.closestTarget.percentage}%)`,
+        `**🏃 Furthest Target**: ${insights.furthestTarget.resource_name || insights.furthestTarget.resource} (${insights.furthestTarget.percentage}%)`
+      ].join('\n');
+
+      embed.addFields(
+        { 
+          name: '🎯 Target Insights', 
+          value: targetsInsight 
+        }
+      );
+    }
+
     return embed;
   } catch (error) {
     console.error('Error creating progress embed:', error);
-    embed.setDescription('An error occurred while loading progress data.');
+    
+    embed.setDescription('An error occurred while loading dashboard data.');
     return embed;
   }
 }

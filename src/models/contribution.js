@@ -34,13 +34,25 @@ class ContributionModel {
   // Get contributions for a target
   static async getByTargetId(targetId, limit = 10) {
     try {
-      const [rows] = await pool.execute(
+      // Use prepared statement with explicit type casting
+      const [rows] = await pool.query(
         'SELECT * FROM contributions WHERE target_id = ? ORDER BY timestamp DESC LIMIT ?',
         [targetId, limit]
       );
       return rows;
     } catch (error) {
       console.error(`Error getting contributions for target ID ${targetId}:`, error);
+      console.error('Full error details:', error);
+      
+      // Additional error diagnosis
+      console.error('Error Code:', error.code);
+      console.error('SQL State:', error.sqlState);
+      console.error('SQL Message:', error.sqlMessage);
+      console.error('Target ID:', targetId);
+      console.error('Limit:', limit);
+      console.error('Target ID Type:', typeof targetId);
+      console.error('Limit Type:', typeof limit);
+      
       throw error;
     }
   }
@@ -48,7 +60,7 @@ class ContributionModel {
   // Get latest contribution for a target
   static async getLatestForTarget(targetId) {
     try {
-      const [rows] = await pool.execute(
+      const [rows] = await pool.query(
         'SELECT * FROM contributions WHERE target_id = ? ORDER BY timestamp DESC LIMIT 1',
         [targetId]
       );
@@ -62,7 +74,7 @@ class ContributionModel {
   // Get contributions by user
   static async getByUserId(userId, limit = 100) {
     try {
-      const [rows] = await pool.execute(
+      const [rows] = await pool.query(
         'SELECT c.*, t.action, t.resource FROM contributions c JOIN targets t ON c.target_id = t.id WHERE c.user_id = ? ORDER BY c.timestamp DESC LIMIT ?',
         [userId, limit]
       );
@@ -76,7 +88,7 @@ class ContributionModel {
   // Get top contributors overall
   static async getTopContributors(limit = 10) {
     try {
-      const [rows] = await pool.execute(`
+      const [rows] = await pool.query(`
         SELECT user_id, username, SUM(amount) as total_amount
         FROM contributions
         GROUP BY user_id, username
@@ -94,7 +106,7 @@ class ContributionModel {
   // Get top contributors by action type
   static async getTopContributorsByAction(action, limit = 10) {
     try {
-      const [rows] = await pool.execute(`
+      const [rows] = await pool.query(`
         SELECT c.user_id, c.username, SUM(c.amount) as total_amount
         FROM contributions c
         JOIN targets t ON c.target_id = t.id
@@ -114,7 +126,7 @@ class ContributionModel {
   // Get contributions by location
   static async getByLocation(location, limit = 100) {
     try {
-      const [rows] = await pool.execute(`
+      const [rows] = await pool.query(`
         SELECT c.*, t.action, t.resource 
         FROM contributions c 
         JOIN targets t ON c.target_id = t.id 
@@ -155,7 +167,7 @@ class ContributionModel {
       query += ' ORDER BY c.timestamp DESC LIMIT ?';
       params.push(limit);
       
-      const [rows] = await pool.execute(query, params);
+      const [rows] = await pool.query(query, params);
       return rows;
     } catch (error) {
       console.error('Error getting contributions with date filter:', error);
@@ -166,7 +178,7 @@ class ContributionModel {
   // Get all locations with resource types
   static async getAllLocations() {
     try {
-      const [rows] = await pool.execute(`
+      const [rows] = await pool.query(`
         SELECT DISTINCT c.location, t.action, t.resource, SUM(c.amount) as total_amount
         FROM contributions c
         JOIN targets t ON c.target_id = t.id

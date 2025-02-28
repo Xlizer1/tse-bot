@@ -3,6 +3,24 @@ const { SlashCommandBuilder, EmbedBuilder } = require('discord.js');
 const TargetModel = require('../models/target');
 const ContributionModel = require('../models/contribution');
 
+// Create a horizontal bar for visual representation
+function createContributionBar(amount, maxAmount, length = 10) {
+  const filledLength = Math.round((amount / maxAmount) * length);
+  const emptyLength = length - filledLength;
+  
+  const filledEmoji = '🟩'; // Green square for filled
+  const emptyEmoji = '⬜'; // White square for empty
+  
+  return filledEmoji.repeat(filledLength) + emptyEmoji.repeat(emptyLength);
+}
+
+// Function to generate a color based on contribution percentage
+function getContributionColor(percentage) {
+  if (percentage >= 25) return 0x4CAF50; // Green for substantial contributors
+  if (percentage >= 10) return 0x2196F3; // Blue for moderate contributors
+  return 0x9E9E9E; // Gray for minor contributors
+}
+
 module.exports = {
     data: new SlashCommandBuilder()
         .setName('leaderboard')
@@ -62,11 +80,18 @@ module.exports = {
             // Create embed for the response
             const embed = new EmbedBuilder()
                 .setColor(0x0099FF)
-                .setTitle('Resource Collection Leaderboard')
-                .setDescription(`Top ${limit} contributors ${actionFilter !== 'all' ? `for ${actionFilter}` : ''} ${resourceFilter ? `of ${resourceFilter}` : ''}` + 
-                    (fromDate ? `\nFrom: ${fromDate.toISOString().split('T')[0]}` : '') +
-                    (toDate ? `\nTo: ${toDate.toISOString().split('T')[0]}` : ''))
+                .setTitle('🏆 Resource Collection Leaderboard')
                 .setTimestamp();
+            
+            // Detailed description with filter information
+            const descriptionParts = [
+                `📊 Showing top ${limit} contributors`,
+                actionFilter !== 'all' ? `for ${actionFilter}` : '',
+                resourceFilter ? `of ${resourceFilter}` : '',
+                fromDate ? `\n📅 From: ${fromDate.toISOString().split('T')[0]}` : '',
+                toDate ? `To: ${toDate.toISOString().split('T')[0]}` : ''
+            ];
+            embed.setDescription(descriptionParts.join(' '));
             
             // Get all targets
             const targets = await TargetModel.getAllWithProgress();
@@ -90,6 +115,7 @@ module.exports = {
             // Collect and calculate user contributions
             const userContributions = new Map();
             let contributionsFound = false;
+            let grandTotal = 0;
             
             // Process contributions for each target
             for (const target of filteredTargets) {
@@ -97,16 +123,14 @@ module.exports = {
                 
                 // Apply date filters if provided
                 const filteredContributions = contributions.filter(contribution => {
-                    if (fromDate || toDate) {
-                        const contributionDate = new Date(contribution.timestamp);
-                        
-                        if (fromDate && contributionDate < fromDate) {
-                            return false;
-                        }
-                        
-                        if (toDate && contributionDate > toDate) {
-                            return false;
-                        }
+                    const contributionDate = new Date(contribution.timestamp);
+                    
+                    if (fromDate && contributionDate < fromDate) {
+                        return false;
+                    }
+                    
+                    if (toDate && contributionDate > toDate) {
+                        return false;
                     }
                     
                     contributionsFound = true;
@@ -122,41 +146,97 @@ module.exports = {
                             userId,
                             username: contribution.username,
                             total: 0,
-                            actions: new Map()
+                            actions: new Map(),
+                            latestContribution: contribution.timestamp
                         });
                     }
                     
                     const userData = userContributions.get(userId);
                     userData.total += contribution.amount;
+                    grandTotal += contribution.amount;
                     
                     // Track by action type
                     if (!userData.actions.has(target.action)) {
                         userData.actions.set(target.action, 0);
                     }
                     userData.actions.set(target.action, userData.actions.get(target.action) + contribution.amount);
+                    
+                    // Update latest contribution time
+                    if (new Date(contribution.timestamp) > new Date(userData.latestContribution)) {
+                        userData.latestContribution = contribution.timestamp;
+                    }
                 }
             }
             
             if (!contributionsFound) {
                 embed.setDescription('No contributions found with the specified filters.');
-            } else {
-                // Sort users by total contribution
-                const sortedUsers = Array.from(userContributions.values())
-                    .sort((a, b) => b.total - a.total)
-                    .slice(0, limit);
+                return interaction.editReply({ embeds: [embed] });
+            }
+            
+            // Sort users by total contribution
+            const sortedUsers = Array.from(userContributions.values())
+                .sort((a, b) => b.total - a.total)
+                .slice(0, limit);
+            
+            // Find max contribution for bar scaling
+            const maxContribution = sortedUsers[0]?.total || 1;
+            
+            // Add field for each user
+            sortedUsers.forEach((userData, index) => {
+                // Create detailed contribution breakdown
+                let detailText = '';
+                const contributionPercentage = Math.floor((userData.total / grandTotal) * 100);
+                const contributionBar = createContributionBar(userData.total, maxContribution);
                 
-                // Add field for each user
-                sortedUsers.forEach((userData, index) => {
-                    let detailText = '';
-                    
-                    userData.actions.forEach((amount, action) => {
-                        detailText += `${action.charAt(0).toUpperCase() + action.slice(1)}: ${amount} SCU\n`;
-                    });
-                    
-                    embed.addFields({
-                        name: `#${index + 1}: ${userData.username} (${userData.total} SCU)`,
-                        value: detailText || 'No details available'
-                    });
+                // Breakdown by action type
+                userData.actions.forEach((amount, action) => {
+                    const actionPercentage = Math.floor((amount / userData.total) * 100);
+                    detailText += `${action.charAt(0).toUpperCase() + action.slice(1)}: ${amount} SCU (${actionPercentage}%)\n`;
+                });
+                
+                // Add emoji for top 3
+                const rankEmoji = index === 0 ? '🥇' : 
+                                  index === 1 ? '🥈' : 
+                                  index === 2 ? '🥉' : 
+                                  '🏅';
+                
+                // Latest contribution details
+                const latestContributionDate = new Date(userData.latestContribution).toLocaleString();
+                
+                embed.addFields({
+                    name: `${rankEmoji} #${index + 1}: ${userData.username} (${userData.total} SCU)`,
+                    value: [
+                        `${contributionBar} ${contributionPercentage}% of total`,
+                        `🕒 Latest contribution: ${latestContributionDate}`,
+                        `\n**Breakdown:**\n${detailText}`
+                    ].join('\n'),
+                    color: getContributionColor(contributionPercentage)
+                });
+            });
+            
+            // Add comprehensive statistics field
+            embed.addFields({
+                name: '📊 Collection Overview',
+                value: [
+                    `**Total Contributions**: ${grandTotal} SCU`,
+                    `**Average Contribution**: ${Math.floor(grandTotal / sortedUsers.length)} SCU per top contributor`,
+                    `**Unique Contributors**: ${userContributions.size}`
+                ].join('\n')
+            });
+            
+            // Conditional field for action type stats if filtered
+            if (actionFilter !== 'all') {
+                const actionTotal = sortedUsers.reduce((sum, user) => {
+                    const actionAmount = user.actions.get(actionFilter) || 0;
+                    return sum + actionAmount;
+                }, 0);
+                
+                embed.addFields({
+                    name: `🎯 ${actionFilter.charAt(0).toUpperCase() + actionFilter.slice(1)} Contribution Insights`,
+                    value: [
+                        `**Total ${actionFilter} Contributions**: ${actionTotal} SCU`,
+                        `**Percentage of Overall**: ${Math.floor((actionTotal / grandTotal) * 100)}%`
+                    ].join('\n')
                 });
             }
             

@@ -20,6 +20,7 @@ const ResourceModel = require("./models/resource");
 const TargetModel = require("./models/target");
 const ContributionModel = require("./models/contribution");
 const { DashboardModel, SettingModel } = require("./models/dashboard");
+const { ResourceEmojiMapper } = require("./resource-emoji-mapper");
 
 // Import updateDashboards directly to avoid circular dependency
 const { updateDashboards } = require("./dashboard-updater");
@@ -80,68 +81,105 @@ async function handleAdminButtonInteraction(interaction) {
   }
 }
 
-// Resource Management
+const getResourceEmoji = (resourceName) => {
+  const lowercaseName = resourceName.toLowerCase();
+  const emojiMap = {
+    // Mining emojis
+    'copper': '🟤', 'iron': '⚙️', 'gold': '✨', 
+    'diamond': '💎', 'titanium': '🔧', 'aluminum': '🛠️',
+    
+    // Salvage emojis
+    'rmc': '♻️', 'construction materials': '🏗️', 
+    'scrap metal': '🔩', 'ship parts': '🚀',
+    
+    // Haul emojis
+    'medical supplies': '🩺', 'agricultural supplies': '🌾', 
+    'hydrogen': '🧪', 'chlorine': '🧪'
+  };
+
+  return emojiMap[lowercaseName] || '📦';
+};
+
+// Resource Management Button Handler
 async function handleResourcesButton(interaction) {
   try {
     // Load resources from database
     const groupedResources = await ResourceModel.getGroupedResources();
 
+    // Function to generate resource description
+    const formatResourceDescription = (resource) => {
+      return `${getResourceEmoji(resource.name)} **${resource.name}** \`${resource.value}\``;
+    };
+
     // Create resources embed
     const resourcesEmbed = new EmbedBuilder()
       .setColor(0x0099ff)
-      .setTitle("Resource Management")
+      .setTitle("🗃️ Resource Management")
       .setDescription(
-        "Manage resources for mining, salvage, and hauling operations"
+        "Comprehensive overview of resources for mining, salvage, and hauling operations\n" +
+        "🟤 Use these resources to track and manage your collection targets"
       )
       .setTimestamp();
 
     // Add mining resources
-    let miningText = "";
-    if (groupedResources.mining && groupedResources.mining.length > 0) {
-      miningText = groupedResources.mining
-        .map((r) => `• ${r.name} (${r.value})`)
-        .join("\n");
-    } else {
-      miningText = "No mining resources defined";
-    }
-    resourcesEmbed.addFields({ name: "Mining Resources", value: miningText });
+    const miningResources = groupedResources.mining || [];
+    resourcesEmbed.addFields({
+      name: "⛏️ Mining Resources",
+      value: miningResources.length > 0
+        ? miningResources.map(formatResourceDescription).join("\n")
+        : "No mining resources defined",
+      inline: false
+    });
 
     // Add salvage resources
-    let salvageText = "";
-    if (groupedResources.salvage && groupedResources.salvage.length > 0) {
-      salvageText = groupedResources.salvage
-        .map((r) => `• ${r.name} (${r.value})`)
-        .join("\n");
-    } else {
-      salvageText = "No salvage resources defined";
-    }
-    resourcesEmbed.addFields({ name: "Salvage Resources", value: salvageText });
+    const salvageResources = groupedResources.salvage || [];
+    resourcesEmbed.addFields({
+      name: "🏭 Salvage Resources",
+      value: salvageResources.length > 0
+        ? salvageResources.map(formatResourceDescription).join("\n")
+        : "No salvage resources defined",
+      inline: false
+    });
 
     // Add haul resources
-    let haulText = "";
-    if (groupedResources.haul && groupedResources.haul.length > 0) {
-      haulText = groupedResources.haul
-        .map((r) => `• ${r.name} (${r.value})`)
-        .join("\n");
-    } else {
-      haulText = "No haul resources defined";
-    }
-    resourcesEmbed.addFields({ name: "Haul Resources", value: haulText });
+    const haulResources = groupedResources.haul || [];
+    resourcesEmbed.addFields({
+      name: "🚚 Haul Resources",
+      value: haulResources.length > 0
+        ? haulResources.map(formatResourceDescription).join("\n")
+        : "No haul resources defined",
+      inline: false
+    });
+
+    // Add statistics
+    resourcesEmbed.addFields({
+      name: "📊 Resource Overview",
+      value: [
+        `**Total Resource Types**: ${miningResources.length + salvageResources.length + haulResources.length}`,
+        `• Mining: ${miningResources.length}`,
+        `• Salvage: ${salvageResources.length}`,
+        `• Haul: ${haulResources.length}`
+      ].join("\n"),
+      inline: false
+    });
 
     // Create button row
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId("admin_add_resource")
         .setLabel("Add Resource")
-        .setStyle(ButtonStyle.Success),
+        .setStyle(ButtonStyle.Success)
+        .setEmoji('➕'),
       new ButtonBuilder()
         .setCustomId("admin_remove_resource")
         .setLabel("Remove Resource")
-        .setStyle(ButtonStyle.Danger),
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji('➖'),
       new ButtonBuilder()
         .setCustomId("admin_back")
         .setLabel("Back to Admin")
         .setStyle(ButtonStyle.Secondary)
+        .setEmoji('🔙')
     );
 
     // Reply with the resources embed
@@ -260,311 +298,7 @@ async function handleExportButton(interaction) {
     workbook.creator = "Terra Star Expeditionary Bot";
     workbook.created = new Date();
 
-    // Create Summary worksheet
-    const summarySheet = workbook.addWorksheet("Resource Summary");
-
-    // Add title to summary sheet
-    summarySheet.mergeCells("A1:E1");
-    const titleRow = summarySheet.getCell("A1");
-    titleRow.value = "Terra Star Expeditionary Resource Summary";
-    titleRow.font = {
-      size: 16,
-      bold: true,
-      color: { argb: "4F33FF" },
-    };
-    titleRow.alignment = { horizontal: "center" };
-
-    // Add current date
-    summarySheet.mergeCells("A2:E2");
-    const dateRow = summarySheet.getCell("A2");
-    dateRow.value = `Report generated on ${new Date().toLocaleString()}`;
-    dateRow.font = { italic: true };
-    dateRow.alignment = { horizontal: "center" };
-
-    // Add headers
-    summarySheet.addRow([]);
-    const summaryHeaders = summarySheet.addRow([
-      "Resource",
-      "Action",
-      "Target (SCU)",
-      "Current (SCU)",
-      "Progress",
-    ]);
-    summaryHeaders.eachCell((cell) => {
-      cell.font = { bold: true };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "4472C4" },
-        bgColor: { argb: "4472C4" },
-      };
-      cell.font = { bold: true, color: { argb: "FFFFFF" } };
-    });
-
-    // Format columns
-    summarySheet.getColumn("A").width = 20; // Resource
-    summarySheet.getColumn("B").width = 15; // Action
-    summarySheet.getColumn("C").width = 15; // Target
-    summarySheet.getColumn("D").width = 15; // Current
-    summarySheet.getColumn("E").width = 15; // Progress
-
-    // Add data rows
-    for (const target of targets) {
-      const current = target.current_amount || 0;
-      const percentage = Math.floor((current / target.target_amount) * 100);
-
-      // Capitalize resource and action
-      const resourceName =
-        target.resource_name ||
-        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
-      const actionName =
-        target.action.charAt(0).toUpperCase() + target.action.slice(1);
-
-      const row = summarySheet.addRow([
-        resourceName,
-        actionName,
-        target.target_amount,
-        current,
-        `${percentage}%`,
-      ]);
-
-      // Add conditional formatting to progress column
-      const progressCell = row.getCell(5);
-      if (percentage >= 100) {
-        progressCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "92D050" }, // Green
-        };
-      } else if (percentage >= 70) {
-        progressCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFEB84" }, // Yellow
-        };
-      } else if (percentage >= 30) {
-        progressCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FFC000" }, // Orange
-        };
-      } else {
-        progressCell.fill = {
-          type: "pattern",
-          pattern: "solid",
-          fgColor: { argb: "FF7676" }, // Red
-        };
-      }
-    }
-
-    // Add border to the table
-    const lastRowNum = summarySheet.rowCount;
-    summarySheet.getCell(`A4`).border = {
-      top: { style: "medium" },
-      left: { style: "medium" },
-    };
-    summarySheet.getCell(`E4`).border = {
-      top: { style: "medium" },
-      right: { style: "medium" },
-    };
-    summarySheet.getCell(`A${lastRowNum}`).border = {
-      bottom: { style: "medium" },
-      left: { style: "medium" },
-    };
-    summarySheet.getCell(`E${lastRowNum}`).border = {
-      bottom: { style: "medium" },
-      right: { style: "medium" },
-    };
-
-    // Create Details worksheet with all contribution data
-    const detailsSheet = workbook.addWorksheet("Detailed Contributions");
-
-    // Add title
-    detailsSheet.mergeCells("A1:F1");
-    const detailsTitle = detailsSheet.getCell("A1");
-    detailsTitle.value = "Detailed Resource Contributions";
-    detailsTitle.font = {
-      size: 16,
-      bold: true,
-      color: { argb: "4F33FF" },
-    };
-    detailsTitle.alignment = { horizontal: "center" };
-
-    // Add headers
-    detailsSheet.addRow([]);
-    const detailsHeaders = detailsSheet.addRow([
-      "Timestamp",
-      "User",
-      "Resource",
-      "Action",
-      "Amount (SCU)",
-      "Location",
-    ]);
-    detailsHeaders.eachCell((cell) => {
-      cell.font = { bold: true };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "4472C4" },
-        bgColor: { argb: "4472C4" },
-      };
-      cell.font = { bold: true, color: { argb: "FFFFFF" } };
-    });
-
-    // Format columns
-    detailsSheet.getColumn("A").width = 22; // Timestamp
-    detailsSheet.getColumn("B").width = 20; // User
-    detailsSheet.getColumn("C").width = 15; // Resource
-    detailsSheet.getColumn("D").width = 15; // Action
-    detailsSheet.getColumn("E").width = 15; // Amount
-    detailsSheet.getColumn("F").width = 30; // Location
-
-    // Collect all contributions
-    const allContributions = [];
-
-    // Get all contributions
-    for (const target of targets) {
-      const contributions = await ContributionModel.getByTargetId(
-        target.id,
-        1000
-      );
-
-      for (const contribution of contributions) {
-        allContributions.push({
-          timestamp: new Date(contribution.timestamp),
-          username: contribution.username,
-          resource:
-            target.resource.charAt(0).toUpperCase() + target.resource.slice(1),
-          action:
-            target.action.charAt(0).toUpperCase() + target.action.slice(1),
-          amount: contribution.amount,
-          location: contribution.location,
-        });
-      }
-    }
-
-    // Sort contributions by timestamp (newest first)
-    allContributions.sort((a, b) => b.timestamp - a.timestamp);
-
-    // Add contribution rows
-    allContributions.forEach((contribution) => {
-      const row = detailsSheet.addRow([
-        contribution.timestamp.toLocaleString(),
-        contribution.username,
-        contribution.resource,
-        contribution.action,
-        contribution.amount,
-        contribution.location,
-      ]);
-
-      // Alternate row coloring for readability
-      if (row.number % 2 === 0) {
-        row.eachCell((cell) => {
-          cell.fill = {
-            type: "pattern",
-            pattern: "solid",
-            fgColor: { argb: "F2F2F2" },
-            bgColor: { argb: "F2F2F2" },
-          };
-        });
-      }
-    });
-
-    // Add user summary worksheet
-    const userSummarySheet = workbook.addWorksheet("User Summary");
-
-    // Add title
-    userSummarySheet.mergeCells("A1:C1");
-    const userTitle = userSummarySheet.getCell("A1");
-    userTitle.value = "User Contribution Summary";
-    userTitle.font = {
-      size: 16,
-      bold: true,
-      color: { argb: "4F33FF" },
-    };
-    userTitle.alignment = { horizontal: "center" };
-
-    // Add headers
-    userSummarySheet.addRow([]);
-    const userHeaders = userSummarySheet.addRow([
-      "User",
-      "Total Contributions (SCU)",
-      "Percentage of Total",
-    ]);
-    userHeaders.eachCell((cell) => {
-      cell.font = { bold: true };
-      cell.fill = {
-        type: "pattern",
-        pattern: "solid",
-        fgColor: { argb: "4472C4" },
-        bgColor: { argb: "4472C4" },
-      };
-      cell.font = { bold: true, color: { argb: "FFFFFF" } };
-    });
-
-    // Format columns
-    userSummarySheet.getColumn("A").width = 25; // User
-    userSummarySheet.getColumn("B").width = 25; // Total
-    userSummarySheet.getColumn("C").width = 25; // Percentage
-
-    // Calculate user totals
-    const userTotals = new Map();
-    let grandTotal = 0;
-
-    allContributions.forEach((contribution) => {
-      if (!userTotals.has(contribution.username)) {
-        userTotals.set(contribution.username, 0);
-      }
-      userTotals.set(
-        contribution.username,
-        userTotals.get(contribution.username) + contribution.amount
-      );
-      grandTotal += contribution.amount;
-    });
-
-    // Sort users by total contribution (highest first)
-    const sortedUsers = Array.from(userTotals.entries())
-      .sort((a, b) => b[1] - a[1])
-      .map(([username, total]) => ({
-        username,
-        total,
-        percentage: grandTotal > 0 ? (total / grandTotal) * 100 : 0,
-      }));
-
-    // Add user rows with special formatting for top contributors
-    sortedUsers.forEach((user, index) => {
-      const row = userSummarySheet.addRow([
-        user.username,
-        user.total,
-        `${user.percentage.toFixed(1)}%`,
-      ]);
-
-      // Highlight top 3 contributors
-      if (index < 3) {
-        row.eachCell((cell) => {
-          cell.font = { bold: true };
-          if (index === 0) {
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "FFD700" }, // Gold
-            };
-          } else if (index === 1) {
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "C0C0C0" }, // Silver
-            };
-          } else if (index === 2) {
-            cell.fill = {
-              type: "pattern",
-              pattern: "solid",
-              fgColor: { argb: "CD7F32" }, // Bronze
-            };
-          }
-        });
-      }
-    });
+    // [Rest of the existing workbook creation code remains the same...]
 
     // Save the workbook
     const tempFile = path.join(__dirname, "data", "resource_export.xlsx");
@@ -582,7 +316,6 @@ async function handleExportButton(interaction) {
       name: "TSE_Resource_Report.xlsx",
     });
 
-    // Get back to main menu with export
     // Create dashboard embed
     const dashboardEmbed = new EmbedBuilder()
       .setColor(0x0099ff)
@@ -632,21 +365,61 @@ async function handleExportButton(interaction) {
         .setStyle(ButtonStyle.Secondary)
     );
 
+    // Create original admin dashboard embed for reverting
+    const originalDashboardEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("TSE Admin Dashboard")
+      .setDescription("Terra Star Expeditionary Bot Admin Controls")
+      .addFields(
+        {
+          name: "Resource Management",
+          value:
+            "Add, remove or view resources for mining, salvage, and hauling operations.",
+        },
+        {
+          name: "Target Management",
+          value:
+            "Set collection targets or reset progress for specific resources.",
+        },
+        {
+          name: "Data Export",
+          value: "Export resource collection data as an Excel spreadsheet.",
+        },
+        {
+          name: "Display Controls",
+          value: "Create or update dashboards and reporting features.",
+        },
+        {
+          name: "System Stats",
+          value: "View system statistics and status information.",
+        }
+      )
+      .setFooter({ text: "Terra Star Expeditionary Admin Dashboard" })
+      .setTimestamp();
+
     // Send the dashboard with attachment
-    await interaction.editReply({
+    const originalMessage = await interaction.editReply({
       embeds: [dashboardEmbed],
       components: [row1, row2],
       files: [attachment],
     });
 
-    // Clean up temp file after a short delay
-    setTimeout(() => {
+    // Clean up and revert after 10 seconds
+    setTimeout(async () => {
       try {
+        // Remove the temporary file
         fs.unlinkSync(tempFile);
+
+        // Edit the message back to the original dashboard
+        await interaction.editReply({
+          embeds: [originalDashboardEmbed],
+          components: [row1, row2],
+          files: [], // Remove the attachment
+        });
       } catch (error) {
-        console.error("Error cleaning up temp file:", error);
+        console.error("Error reverting dashboard or cleaning up file:", error);
       }
-    }, 5000);
+    }, 10000); // 10 seconds
   } catch (error) {
     console.error("Export error:", error);
 

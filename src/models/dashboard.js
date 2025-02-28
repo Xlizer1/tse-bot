@@ -55,9 +55,43 @@ class SettingModel {
   static async get(key) {
     try {
       const [rows] = await pool.execute('SELECT * FROM settings WHERE setting_key = ?', [key]);
+      
       if (rows.length === 0) return null;
       
-      return JSON.parse(rows[0].setting_value);
+      let parsedValue;
+      const settingValue = rows[0].setting_value;
+      
+      // Log the raw setting value for debugging
+      console.log(`Raw setting value for ${key}:`, settingValue);
+      console.log(`Type of setting value:`, typeof settingValue);
+      
+      // Handle different possible formats
+      if (typeof settingValue === 'object') {
+        // If it's already an object, return it directly
+        return settingValue;
+      }
+      
+      try {
+        // Try parsing as JSON
+        if (typeof settingValue === 'string') {
+          parsedValue = JSON.parse(settingValue);
+        } else {
+          // If it's not a string, try converting to string first
+          parsedValue = JSON.parse(String(settingValue));
+        }
+      } catch (jsonError) {
+        console.warn(`Warning: Unable to parse JSON for setting ${key}:`, jsonError);
+        
+        try {
+          // Fallback parsing attempt
+          parsedValue = eval(`(${settingValue})`);
+        } catch (evalError) {
+          console.error(`Could not parse setting ${key} using fallback methods:`, evalError);
+          return null;
+        }
+      }
+      
+      return parsedValue;
     } catch (error) {
       console.error(`Error getting setting ${key}:`, error);
       throw error;
@@ -67,7 +101,10 @@ class SettingModel {
   // Set a setting value
   static async set(key, value) {
     try {
-      const jsonValue = JSON.stringify(value);
+      // Ensure value is a valid JSON string
+      const jsonValue = typeof value === 'string' 
+        ? value 
+        : JSON.stringify(value);
       
       // Use INSERT ... ON DUPLICATE KEY UPDATE
       const [result] = await pool.execute(
@@ -84,12 +121,35 @@ class SettingModel {
 
   // Get auto report settings
   static async getAutoReport() {
-    return await this.get('autoReport') || { enabled: false };
+    const defaultSettings = { 
+      enabled: false, 
+      channelId: null, 
+      time: null, 
+      guildId: null, 
+      lastReportDate: null 
+    };
+
+    try {
+      const settings = await this.get('autoReport');
+      return settings || defaultSettings;
+    } catch (error) {
+      console.error('Error retrieving auto report settings:', error);
+      return defaultSettings;
+    }
   }
 
   // Set auto report settings
   static async setAutoReport(settings) {
-    return await this.set('autoReport', settings);
+    // Ensure all expected fields are present
+    const completeSettings = {
+      enabled: settings.enabled ?? false,
+      channelId: settings.channelId ?? null,
+      time: settings.time ?? null,
+      guildId: settings.guildId ?? null,
+      lastReportDate: settings.lastReportDate ?? null
+    };
+
+    return await this.set('autoReport', completeSettings);
   }
 }
 
