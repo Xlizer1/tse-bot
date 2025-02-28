@@ -11,7 +11,7 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
-  charset: 'utf8mb4'
+  charset: "utf8mb4",
 });
 
 // Test database connection
@@ -32,7 +32,7 @@ async function initDatabase() {
   try {
     // Set character encoding to help with key length issues
     await pool.execute(`SET NAMES utf8mb4`);
-    
+
     console.log("Creating resources table...");
     await pool.execute(`
         CREATE TABLE IF NOT EXISTS resources (
@@ -122,15 +122,15 @@ async function seedDefaultResources() {
     // Check if resources table exists before counting
     const [tableExists] = await pool.execute(
       `SELECT COUNT(*) as count FROM information_schema.tables 
-       WHERE table_schema = ? AND table_name = 'resources'`, 
+       WHERE table_schema = ? AND table_name = 'resources'`,
       [process.env.DB_NAME]
     );
-    
+
     if (tableExists[0].count === 0) {
       console.log("Resources table doesn't exist yet, skipping seeding");
       return;
     }
-    
+
     const [rows] = await pool.execute(
       "SELECT COUNT(*) as count FROM resources"
     );
@@ -173,7 +173,7 @@ async function seedDefaultResources() {
       ];
 
       console.log(`Seeding ${allResources.length} default resources...`);
-      
+
       for (const [name, value, action_type] of allResources) {
         try {
           await pool.execute(
@@ -187,7 +187,9 @@ async function seedDefaultResources() {
 
       console.log("Default resources seeded successfully");
     } else {
-      console.log(`Found ${rows[0].count} existing resources, skipping seeding`);
+      console.log(
+        `Found ${rows[0].count} existing resources, skipping seeding`
+      );
     }
   } catch (error) {
     console.error("Error seeding default resources:", error);

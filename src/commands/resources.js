@@ -1,4 +1,8 @@
-const { SlashCommandBuilder, EmbedBuilder } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  EmbedBuilder,
+  MessageFlags,
+} = require("discord.js");
 const ResourceModel = require("../models/resource");
 
 module.exports = {
@@ -124,7 +128,7 @@ module.exports = {
           return interaction.reply({
             content:
               "You do not have permission to add resources. Only administrators can manage resources.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         }
 
@@ -144,7 +148,7 @@ module.exports = {
         if (existingResource) {
           return interaction.reply({
             content: `Resource "${value}" already exists for the ${actionType} action type.`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         }
 
@@ -153,14 +157,14 @@ module.exports = {
 
         await interaction.reply({
           content: `Added "${name}" (${value}) to the ${actionType} resources list.`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     } catch (error) {
       console.error("Error in resources command:", error);
       await interaction.reply({
         content: "An error occurred while managing resources.",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     }
   },

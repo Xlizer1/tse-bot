@@ -1,13 +1,13 @@
-const { setupDatabase } = require('./src/database');
+const { setupDatabase } = require("./src/database");
 
 async function initDb() {
   try {
-    console.log('Starting database initialization...');
+    console.log("Starting database initialization...");
     await setupDatabase();
-    console.log('Database initialization complete!');
+    console.log("Database initialization complete!");
     process.exit(0);
   } catch (error) {
-    console.error('Database initialization failed:', error);
+    console.error("Database initialization failed:", error);
     process.exit(1);
   }
 }

@@ -1,5 +1,3 @@
-// admin-handlers.js - Updated to use MySQL database
-
 const {
   EmbedBuilder,
   ActionRowBuilder,
@@ -10,32 +8,27 @@ const {
   TextInputBuilder,
   TextInputStyle,
   AttachmentBuilder,
+  MessageFlags,
 } = require("discord.js");
 const fs = require("fs");
 const path = require("path");
 const ExcelJS = require("exceljs");
 
-// Import models
 const ResourceModel = require("./models/resource");
 const TargetModel = require("./models/target");
 const ContributionModel = require("./models/contribution");
 const { DashboardModel, SettingModel } = require("./models/dashboard");
-const { ResourceEmojiMapper } = require("./resource-emoji-mapper");
 
-// Import updateDashboards directly to avoid circular dependency
 const { updateDashboards } = require("./dashboard-updater");
 
-// Handle admin dashboard button interactions
 async function handleAdminButtonInteraction(interaction) {
-  // Verify admin permissions again
   if (!interaction.member.permissions.has("Administrator")) {
     return interaction.reply({
       content: "You do not have permission to use admin controls.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
-  // Get the button ID that was clicked
   const buttonId = interaction.customId;
 
   switch (buttonId) {
@@ -85,19 +78,27 @@ const getResourceEmoji = (resourceName) => {
   const lowercaseName = resourceName.toLowerCase();
   const emojiMap = {
     // Mining emojis
-    'copper': '🟤', 'iron': '⚙️', 'gold': '✨', 
-    'diamond': '💎', 'titanium': '🔧', 'aluminum': '🛠️',
-    
+    copper: "🟤",
+    iron: "⚙️",
+    gold: "✨",
+    diamond: "💎",
+    titanium: "🔧",
+    aluminum: "🛠️",
+
     // Salvage emojis
-    'rmc': '♻️', 'construction materials': '🏗️', 
-    'scrap metal': '🔩', 'ship parts': '🚀',
-    
+    rmc: "♻️",
+    "construction materials": "🏗️",
+    "scrap metal": "🔩",
+    "ship parts": "🚀",
+
     // Haul emojis
-    'medical supplies': '🩺', 'agricultural supplies': '🌾', 
-    'hydrogen': '🧪', 'chlorine': '🧪'
+    "medical supplies": "🩺",
+    "agricultural supplies": "🌾",
+    hydrogen: "🧪",
+    chlorine: "🧪",
   };
 
-  return emojiMap[lowercaseName] || '📦';
+  return emojiMap[lowercaseName] || "📦";
 };
 
 // Resource Management Button Handler
@@ -108,7 +109,9 @@ async function handleResourcesButton(interaction) {
 
     // Function to generate resource description
     const formatResourceDescription = (resource) => {
-      return `${getResourceEmoji(resource.name)} **${resource.name}** \`${resource.value}\``;
+      return `${getResourceEmoji(resource.name)} **${resource.name}** \`${
+        resource.value
+      }\``;
     };
 
     // Create resources embed
@@ -117,7 +120,7 @@ async function handleResourcesButton(interaction) {
       .setTitle("🗃️ Resource Management")
       .setDescription(
         "Comprehensive overview of resources for mining, salvage, and hauling operations\n" +
-        "🟤 Use these resources to track and manage your collection targets"
+          "🟤 Use these resources to track and manage your collection targets"
       )
       .setTimestamp();
 
@@ -125,42 +128,49 @@ async function handleResourcesButton(interaction) {
     const miningResources = groupedResources.mining || [];
     resourcesEmbed.addFields({
       name: "⛏️ Mining Resources",
-      value: miningResources.length > 0
-        ? miningResources.map(formatResourceDescription).join("\n")
-        : "No mining resources defined",
-      inline: false
+      value:
+        miningResources.length > 0
+          ? miningResources.map(formatResourceDescription).join("\n")
+          : "No mining resources defined",
+      inline: false,
     });
 
     // Add salvage resources
     const salvageResources = groupedResources.salvage || [];
     resourcesEmbed.addFields({
       name: "🏭 Salvage Resources",
-      value: salvageResources.length > 0
-        ? salvageResources.map(formatResourceDescription).join("\n")
-        : "No salvage resources defined",
-      inline: false
+      value:
+        salvageResources.length > 0
+          ? salvageResources.map(formatResourceDescription).join("\n")
+          : "No salvage resources defined",
+      inline: false,
     });
 
     // Add haul resources
     const haulResources = groupedResources.haul || [];
     resourcesEmbed.addFields({
       name: "🚚 Haul Resources",
-      value: haulResources.length > 0
-        ? haulResources.map(formatResourceDescription).join("\n")
-        : "No haul resources defined",
-      inline: false
+      value:
+        haulResources.length > 0
+          ? haulResources.map(formatResourceDescription).join("\n")
+          : "No haul resources defined",
+      inline: false,
     });
 
     // Add statistics
     resourcesEmbed.addFields({
       name: "📊 Resource Overview",
       value: [
-        `**Total Resource Types**: ${miningResources.length + salvageResources.length + haulResources.length}`,
+        `**Total Resource Types**: ${
+          miningResources.length +
+          salvageResources.length +
+          haulResources.length
+        }`,
         `• Mining: ${miningResources.length}`,
         `• Salvage: ${salvageResources.length}`,
-        `• Haul: ${haulResources.length}`
+        `• Haul: ${haulResources.length}`,
       ].join("\n"),
-      inline: false
+      inline: false,
     });
 
     // Create button row
@@ -169,17 +179,17 @@ async function handleResourcesButton(interaction) {
         .setCustomId("admin_add_resource")
         .setLabel("Add Resource")
         .setStyle(ButtonStyle.Success)
-        .setEmoji('➕'),
+        .setEmoji("➕"),
       new ButtonBuilder()
         .setCustomId("admin_remove_resource")
         .setLabel("Remove Resource")
         .setStyle(ButtonStyle.Danger)
-        .setEmoji('➖'),
+        .setEmoji("➖"),
       new ButtonBuilder()
         .setCustomId("admin_back")
         .setLabel("Back to Admin")
         .setStyle(ButtonStyle.Secondary)
-        .setEmoji('🔙')
+        .setEmoji("🔙")
     );
 
     // Reply with the resources embed
@@ -298,10 +308,360 @@ async function handleExportButton(interaction) {
     workbook.creator = "Terra Star Expeditionary Bot";
     workbook.created = new Date();
 
-    // [Rest of the existing workbook creation code remains the same...]
+    // Create Summary worksheet
+    const summarySheet = workbook.addWorksheet("Resource Summary");
 
-    // Save the workbook
-    const tempFile = path.join(__dirname, "data", "resource_export.xlsx");
+    // Add title to summary sheet
+    summarySheet.mergeCells("A1:E1");
+    const titleRow = summarySheet.getCell("A1");
+    titleRow.value = "Terra Star Expeditionary Resource Summary";
+    titleRow.font = {
+      size: 16,
+      bold: true,
+      color: { argb: "4F33FF" },
+    };
+    titleRow.alignment = { horizontal: "center" };
+
+    // Add current date
+    summarySheet.mergeCells("A2:E2");
+    const dateRow = summarySheet.getCell("A2");
+    dateRow.value = `Report generated on ${new Date().toLocaleString()}`;
+    dateRow.font = { italic: true };
+    dateRow.alignment = { horizontal: "center" };
+
+    // Add headers
+    summarySheet.addRow([]);
+    const summaryHeaders = summarySheet.addRow([
+      "Resource",
+      "Action",
+      "Target (SCU)",
+      "Current (SCU)",
+      "Progress",
+    ]);
+    summaryHeaders.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4472C4" },
+        bgColor: { argb: "4472C4" },
+      };
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+    });
+
+    // Format columns
+    summarySheet.getColumn("A").width = 20; // Resource
+    summarySheet.getColumn("B").width = 15; // Action
+    summarySheet.getColumn("C").width = 15; // Target
+    summarySheet.getColumn("D").width = 15; // Current
+    summarySheet.getColumn("E").width = 15; // Progress
+
+    // Add data rows
+    for (const target of targets) {
+      const current = target.current_amount || 0;
+      const percentage = Math.floor((current / target.target_amount) * 100);
+
+      // Capitalize resource and action
+      const resourceName =
+        target.resource_name ||
+        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+      const actionName =
+        target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+      const row = summarySheet.addRow([
+        resourceName,
+        actionName,
+        target.target_amount,
+        current,
+        `${percentage}%`,
+      ]);
+
+      // Add conditional formatting to progress column
+      const progressCell = row.getCell(5);
+      if (percentage >= 100) {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "92D050" }, // Green
+        };
+      } else if (percentage >= 70) {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFEB84" }, // Yellow
+        };
+      } else if (percentage >= 30) {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFC000" }, // Orange
+        };
+      } else {
+        progressCell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FF7676" }, // Red
+        };
+      }
+    }
+
+    // Add border to the table
+    const lastRowNum = summarySheet.rowCount;
+    for (let i = 4; i <= lastRowNum; i++) {
+      for (let j = 1; j <= 5; j++) {
+        const cell = summarySheet.getCell(i, j);
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      }
+    }
+
+    // Create Contributions worksheet
+    const contributionsSheet = workbook.addWorksheet("Detailed Contributions");
+
+    // Add title
+    contributionsSheet.mergeCells("A1:F1");
+    const contribTitle = contributionsSheet.getCell("A1");
+    contribTitle.value = "Detailed Resource Contributions";
+    contribTitle.font = {
+      size: 16,
+      bold: true,
+      color: { argb: "4F33FF" },
+    };
+    contribTitle.alignment = { horizontal: "center" };
+
+    // Add headers
+    contributionsSheet.addRow([]);
+    const contribHeaders = contributionsSheet.addRow([
+      "Timestamp",
+      "User",
+      "Resource",
+      "Action",
+      "Amount (SCU)",
+      "Location",
+    ]);
+    contribHeaders.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4472C4" },
+        bgColor: { argb: "4472C4" },
+      };
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+    });
+
+    // Format columns
+    contributionsSheet.getColumn("A").width = 22; // Timestamp
+    contributionsSheet.getColumn("B").width = 20; // User
+    contributionsSheet.getColumn("C").width = 15; // Resource
+    contributionsSheet.getColumn("D").width = 15; // Action
+    contributionsSheet.getColumn("E").width = 15; // Amount
+    contributionsSheet.getColumn("F").width = 30; // Location
+
+    // Collect all contributions
+    const allContributions = [];
+
+    // Get all contributions for each target
+    for (const target of targets) {
+      const contributions = await ContributionModel.getByTargetId(
+        target.id,
+        1000
+      );
+
+      for (const contribution of contributions) {
+        const resourceName =
+          target.resource_name ||
+          target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+        const actionName =
+          target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+        allContributions.push({
+          timestamp: new Date(contribution.timestamp),
+          username: contribution.username,
+          resource: resourceName,
+          action: actionName,
+          amount: contribution.amount,
+          location: contribution.location,
+        });
+      }
+    }
+
+    // Sort contributions by timestamp (newest first)
+    allContributions.sort((a, b) => b.timestamp - a.timestamp);
+
+    // Add contribution rows
+    allContributions.forEach((contribution, index) => {
+      const row = contributionsSheet.addRow([
+        contribution.timestamp.toLocaleString(),
+        contribution.username,
+        contribution.resource,
+        contribution.action,
+        contribution.amount,
+        contribution.location,
+      ]);
+
+      // Alternate row coloring for readability
+      if (index % 2 === 1) {
+        row.eachCell((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "F2F2F2" },
+            bgColor: { argb: "F2F2F2" },
+          };
+        });
+      }
+
+      // Add borders
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+    });
+
+    // Create Leaderboard worksheet
+    const leaderboardSheet = workbook.addWorksheet("User Leaderboard");
+
+    // Add title
+    leaderboardSheet.mergeCells("A1:C1");
+    const leaderTitle = leaderboardSheet.getCell("A1");
+    leaderTitle.value = "User Contribution Summary";
+    leaderTitle.font = {
+      size: 16,
+      bold: true,
+      color: { argb: "4F33FF" },
+    };
+    leaderTitle.alignment = { horizontal: "center" };
+
+    // Add headers
+    leaderboardSheet.addRow([]);
+    const leaderHeaders = leaderboardSheet.addRow([
+      "User",
+      "Total Contributions (SCU)",
+      "Percentage of Total",
+    ]);
+    leaderHeaders.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4472C4" },
+        bgColor: { argb: "4472C4" },
+      };
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+    });
+
+    // Format columns
+    leaderboardSheet.getColumn("A").width = 25; // User
+    leaderboardSheet.getColumn("B").width = 25; // Total
+    leaderboardSheet.getColumn("C").width = 25; // Percentage
+
+    // Calculate user totals
+    const userTotals = new Map();
+    let grandTotal = 0;
+
+    allContributions.forEach((contribution) => {
+      if (!userTotals.has(contribution.username)) {
+        userTotals.set(contribution.username, 0);
+      }
+      const amount = contribution.amount;
+      userTotals.set(
+        contribution.username,
+        userTotals.get(contribution.username) + amount
+      );
+      grandTotal += amount;
+    });
+
+    // Sort users by total contribution (highest first)
+    const sortedUsers = Array.from(userTotals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([username, total]) => ({
+        username,
+        total,
+        percentage: grandTotal > 0 ? (total / grandTotal) * 100 : 0,
+      }));
+
+    // Add user rows
+    sortedUsers.forEach((user, index) => {
+      const row = leaderboardSheet.addRow([
+        user.username,
+        user.total,
+        `${user.percentage.toFixed(1)}%`,
+      ]);
+
+      // Highlight top 3 contributors
+      if (index < 3) {
+        row.eachCell((cell) => {
+          cell.font = { bold: true };
+          if (index === 0) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "FFD700" }, // Gold
+            };
+          } else if (index === 1) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "C0C0C0" }, // Silver
+            };
+          } else if (index === 2) {
+            cell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: "CD7F32" }, // Bronze
+            };
+          }
+        });
+      } else if (index % 2 === 1) {
+        // Alternate row coloring
+        row.eachCell((cell) => {
+          cell.fill = {
+            type: "pattern",
+            pattern: "solid",
+            fgColor: { argb: "F2F2F2" },
+            bgColor: { argb: "F2F2F2" },
+          };
+        });
+      }
+
+      // Add borders
+      row.eachCell((cell) => {
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          bottom: { style: "thin" },
+          right: { style: "thin" },
+        };
+      });
+    });
+
+    // Add total row
+    const totalRow = leaderboardSheet.addRow(["TOTAL", grandTotal, "100.0%"]);
+    totalRow.eachCell((cell) => {
+      cell.font = { bold: true };
+      cell.fill = {
+        type: "pattern",
+        pattern: "solid",
+        fgColor: { argb: "4472C4" },
+        bgColor: { argb: "4472C4" },
+      };
+      cell.font = { bold: true, color: { argb: "FFFFFF" } };
+      cell.border = {
+        top: { style: "thin" },
+        left: { style: "thin" },
+        bottom: { style: "thin" },
+        right: { style: "thin" },
+      };
+    });
 
     // Ensure data directory exists
     const dataDir = path.join(__dirname, "data");
@@ -309,6 +669,8 @@ async function handleExportButton(interaction) {
       fs.mkdirSync(dataDir, { recursive: true });
     }
 
+    // Save the workbook
+    const tempFile = path.join(__dirname, "data", "resource_export.xlsx");
     await workbook.xlsx.writeFile(tempFile);
 
     // Create attachment
@@ -1062,7 +1424,7 @@ async function handleAdminSelectMenuInteraction(interaction) {
   if (!interaction.member.permissions.has("Administrator")) {
     return interaction.reply({
       content: "You do not have permission to use admin controls.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1500,7 +1862,7 @@ async function handleAdminModalSubmit(interaction) {
   if (!interaction.member.permissions.has("Administrator")) {
     return interaction.reply({
       content: "You do not have permission to use admin controls.",
-      ephemeral: true,
+      flags: MessageFlags.Ephemeral,
     });
   }
 
@@ -1522,7 +1884,7 @@ async function handleAdminModalSubmit(interaction) {
       // Success message
       await interaction.reply({
         content: `Successfully added ${name} (${value}) to ${actionType} resources.`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1541,7 +1903,7 @@ async function handleAdminModalSubmit(interaction) {
 
       await interaction.reply({
         content: `Error adding resource: ${error.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1557,7 +1919,7 @@ async function handleAdminModalSubmit(interaction) {
     const resourceKey = modalId.replace("admin_add_target_modal_", "");
 
     // First, acknowledge the interaction to prevent timeout
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
       // Get action type from message content
@@ -1715,7 +2077,7 @@ async function handleAdminModalSubmit(interaction) {
         editReply: async (data) => {
           await interaction.reply({
             content: "Dashboard created successfully!",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
             components: [
               new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -1739,7 +2101,7 @@ async function handleAdminModalSubmit(interaction) {
 
       await interaction.reply({
         content: `Error creating dashboard: ${error.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1767,7 +2129,7 @@ async function handleAdminModalSubmit(interaction) {
       return interaction.reply({
         content:
           "Invalid time format. Please use 24h format (e.g., 08:00 or 20:30).",
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1805,7 +2167,7 @@ async function handleAdminModalSubmit(interaction) {
             ? `Reports will be posted in <#${channelId}> at ${time} UTC.`
             : ""
         }`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1824,7 +2186,7 @@ async function handleAdminModalSubmit(interaction) {
 
       await interaction.reply({
         content: `Error configuring auto reports: ${error.message}`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()

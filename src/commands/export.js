@@ -1,11 +1,13 @@
-// src/commands/export.js
-const { SlashCommandBuilder, AttachmentBuilder } = require("discord.js");
+const {
+  SlashCommandBuilder,
+  AttachmentBuilder,
+  MessageFlags,
+} = require("discord.js");
 const ExcelJS = require("exceljs");
 const path = require("path");
 const fs = require("fs");
 const TargetModel = require("../models/target");
 const ContributionModel = require("../models/contribution");
-const ResourceModel = require("../models/resource");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -19,7 +21,7 @@ module.exports = {
         return interaction.reply({
           content:
             "You do not have permission to use this command. Only administrators can export data.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 
@@ -32,7 +34,7 @@ module.exports = {
       if (targets.length === 0) {
         return interaction.editReply({
           content: "No data available to export.",
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
 

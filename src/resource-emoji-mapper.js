@@ -1,4 +1,3 @@
-// Comprehensive emoji mapping system
 const ResourceEmojiMapper = {
   // Base emoji mapping
   baseEmojiMap: {

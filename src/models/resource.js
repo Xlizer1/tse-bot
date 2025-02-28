@@ -1,13 +1,15 @@
-const { pool } = require('../database');
+const { pool } = require("../database");
 
 class ResourceModel {
   // Get all resources
   static async getAll() {
     try {
-      const [rows] = await pool.execute('SELECT * FROM resources ORDER BY action_type, name');
+      const [rows] = await pool.execute(
+        "SELECT * FROM resources ORDER BY action_type, name"
+      );
       return rows;
     } catch (error) {
-      console.error('Error getting resources:', error);
+      console.error("Error getting resources:", error);
       throw error;
     }
   }
@@ -16,7 +18,7 @@ class ResourceModel {
   static async getByActionType(actionType) {
     try {
       const [rows] = await pool.execute(
-        'SELECT * FROM resources WHERE action_type = ? ORDER BY name',
+        "SELECT * FROM resources WHERE action_type = ? ORDER BY name",
         [actionType]
       );
       return rows;
@@ -30,7 +32,7 @@ class ResourceModel {
   static async getByValueAndType(value, actionType) {
     try {
       const [rows] = await pool.execute(
-        'SELECT * FROM resources WHERE value = ? AND action_type = ?',
+        "SELECT * FROM resources WHERE value = ? AND action_type = ?",
         [value, actionType]
       );
       return rows[0] || null;
@@ -44,12 +46,12 @@ class ResourceModel {
   static async add(name, value, actionType) {
     try {
       const [result] = await pool.execute(
-        'INSERT INTO resources (name, value, action_type) VALUES (?, ?, ?)',
+        "INSERT INTO resources (name, value, action_type) VALUES (?, ?, ?)",
         [name, value, actionType]
       );
       return result.insertId;
     } catch (error) {
-      console.error('Error adding resource:', error);
+      console.error("Error adding resource:", error);
       throw error;
     }
   }
@@ -58,47 +60,49 @@ class ResourceModel {
   static async remove(value, actionType) {
     try {
       const [result] = await pool.execute(
-        'DELETE FROM resources WHERE value = ? AND action_type = ?',
+        "DELETE FROM resources WHERE value = ? AND action_type = ?",
         [value, actionType]
       );
       return result.affectedRows > 0;
     } catch (error) {
-      console.error('Error removing resource:', error);
+      console.error("Error removing resource:", error);
       throw error;
     }
   }
 
   // Format resources for Discord choices
   static formatResourceChoices(resources) {
-    return resources.map(resource => ({
+    return resources.map((resource) => ({
       name: resource.name,
-      value: resource.value
+      value: resource.value,
     }));
   }
 
   // Get resources grouped by action type
   static async getGroupedResources() {
     try {
-      const [rows] = await pool.execute('SELECT * FROM resources ORDER BY action_type, name');
-      
+      const [rows] = await pool.execute(
+        "SELECT * FROM resources ORDER BY action_type, name"
+      );
+
       const grouped = {
         mining: [],
         salvage: [],
-        haul: []
+        haul: [],
       };
-      
-      rows.forEach(resource => {
+
+      rows.forEach((resource) => {
         if (grouped[resource.action_type]) {
           grouped[resource.action_type].push({
             name: resource.name,
-            value: resource.value
+            value: resource.value,
           });
         }
       });
-      
+
       return grouped;
     } catch (error) {
-      console.error('Error getting grouped resources:', error);
+      console.error("Error getting grouped resources:", error);
       throw error;
     }
   }
