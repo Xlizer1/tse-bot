@@ -76,8 +76,8 @@ class SettingModel {
       const settingValue = rows[0].setting_value;
 
       // Log the raw setting value for debugging
-      console.log(`Raw setting value for ${key}:`, settingValue);
-      console.log(`Type of setting value:`, typeof settingValue);
+      // console.log(`Raw setting value for ${key}:`, settingValue);
+      // console.log(`Type of setting value:`, typeof settingValue);
 
       // Handle different possible formats
       if (typeof settingValue === "object") {

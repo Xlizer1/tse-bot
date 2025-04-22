@@ -93,7 +93,10 @@ module.exports = {
 
       // Process each target
       for (const target of filteredTargets) {
-        let current = target.current_amount || 0;
+        let current =
+          target.current_amount > target.target_amount
+            ? target.target_amount
+            : target.current_amount || 0;
 
         // Apply date filters if provided
         if (fromDate || toDate) {
