@@ -71,10 +71,19 @@ async function deployCommands() {
               // Add choices to the resource option
               resourceOption.choices = resourceChoices;
 
+              // Create a variant command name - ensure it's lowercase and valid
+              // Discord command names must be between 1-32 characters, lowercase, and contain only alphanumeric or underscore
+              // Fix: Ensure the variant name is within Discord's limits and properly formatted
+              const variantName = `${commandData.name}-${actionValue}`.toLowerCase();
+              
+              if (variantName.length > 32) {
+                console.warn(`Warning: Command name "${variantName}" exceeds 32 characters and will be truncated.`);
+              }
+              
               // Create a separate command variant for this action
               const variantCommand = {
                 ...commandData,
-                name: `${commandData.name}_${actionValue}`,
+                name: variantName.substring(0, 32), // Ensure name is not too long
                 options: [
                   {
                     ...resourceOption,
@@ -142,6 +151,12 @@ async function deployCommands() {
         commands.push(command.data.toJSON());
       }
     }
+
+    // Debug output to check command names
+    console.log("Command names being deployed:");
+    commands.forEach((cmd, index) => {
+      console.log(`${index}. ${cmd.name}`);
+    });
 
     const rest = new REST({ version: "9" }).setToken(process.env.TOKEN);
 
