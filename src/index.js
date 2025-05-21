@@ -13,7 +13,7 @@ const {
 } = require("./button-handlers");
 const { setupAutoReporting } = require("./schedulers/auto-report");
 const { updateDashboards } = require("./dashboard-updater");
-const { setupDatabase } = require("./database");
+const { setupDatabase, pool } = require("./database");
 require("dotenv").config();
 
 const client = new Client({
@@ -24,6 +24,7 @@ const client = new Client({
   ],
 });
 
+client.db = pool;
 client.commands = new Collection();
 const commandFiles = fs
   .readdirSync(path.join(__dirname, "commands"))
@@ -41,6 +42,9 @@ async function init() {
     await setupDatabase();
     console.log("Database initialization complete");
 
+    // Add direct database access
+    client.db = pool.promise();
+    
     // Start the bot after database is initialized
     startBot();
   } catch (error) {
@@ -63,15 +67,20 @@ function startBot() {
 
   client.on("interactionCreate", async (interaction) => {
     try {
+      // Store guild ID for this interaction
+      const guildId = interactionContext.getGuildId(interaction);
+
       // Handle different interaction types
       if (interaction.isCommand()) {
-        await handleCommandInteraction(interaction);
+        await handleCommandInteraction(interaction, guildId);
       } else if (interaction.isButton()) {
-        await handleButtonInteraction(interaction);
+        await handleButtonInteraction(interaction, guildId);
       } else if (interaction.isStringSelectMenu()) {
-        await handleSelectMenuInteraction(interaction);
+        await handleSelectMenuInteraction(interaction, guildId);
       } else if (interaction.isModalSubmit()) {
-        await handleModalSubmitInteraction(interaction);
+        await handleModalSubmitInteraction(interaction, guildId);
+      } else if (interaction.isAutocomplete()) {
+        await handleAutocompleteInteraction(interaction, guildId);
       }
     } catch (error) {
       console.error("Error handling interaction:", error);
@@ -92,7 +101,7 @@ function startBot() {
   });
 
   // Handle command interactions
-  async function handleCommandInteraction(interaction) {
+  async function handleCommandInteraction(interaction, guildId) {
     const command = client.commands.get(interaction.commandName);
 
     if (!command) {
@@ -105,7 +114,7 @@ function startBot() {
     }
 
     try {
-      await command.execute(interaction);
+      await command.execute(interaction, guildId);
     } catch (error) {
       console.error(
         `Error executing command ${interaction.commandName}:`,
@@ -124,6 +133,21 @@ function startBot() {
           flags: MessageFlags.Ephemeral,
         });
       }
+    }
+  }
+
+  async function handleAutocompleteInteraction(interaction, guildId) {
+    const command = client.commands.get(interaction.commandName);
+
+    if (!command || !command.autocomplete) return;
+
+    try {
+      await command.autocomplete(interaction, guildId);
+    } catch (error) {
+      console.error(
+        `Error handling autocomplete for ${interaction.commandName}:`,
+        error
+      );
     }
   }
 

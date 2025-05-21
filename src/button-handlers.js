@@ -17,42 +17,64 @@ const {
 } = require("./dashboard-updater");
 
 // Handler for button interactions
-async function handleButtonInteraction(interaction) {
+async function handleButtonInteraction(interaction, guildId) {
   // Get the button ID that was clicked
   const buttonId = interaction.customId;
+  
+  // Extract source guild ID from shared dashboard buttons
+  let sourceGuildId = guildId;
+  if (buttonId.includes("_")) {
+    const parts = buttonId.split("_");
+    if (parts.length > 2) {
+      // Format: action_name_guildId
+      sourceGuildId = parts[parts.length - 1];
+      // Reform the original button ID without the guild suffix
+      buttonParts = parts.slice(0, parts.length - 1);
+      buttonBase = buttonParts.join("_");
+    }
+  }
 
   // Handle admin buttons
   if (buttonId.startsWith("admin_")) {
     // Import admin handlers dynamically to avoid circular dependency
     const adminHandlers = require("./admin-handlers");
-    await adminHandlers.handleAdminButtonInteraction(interaction);
+    await adminHandlers.handleAdminButtonInteraction(interaction, guildId);
     return;
   }
 
   switch (buttonId) {
     case "add_resources":
-      await handleAddResourcesButton(interaction);
+      await handleAddResourcesButton(interaction, guildId);
       break;
     case "view_progress":
-      await handleViewProgressButton(interaction);
+      await handleViewProgressButton(interaction, guildId);
       break;
     case "view_leaderboard":
-      await handleViewLeaderboardButton(interaction);
+      await handleViewLeaderboardButton(interaction, guildId);
       break;
     case "view_locations":
-      await handleViewLocationsButton(interaction);
+      await handleViewLocationsButton(interaction, guildId);
       break;
     case "refresh_dashboard":
       await handleRefreshDashboard(interaction);
       break;
+    default:
+      // Handle shared dashboard buttons
+      if (buttonId.startsWith("view_progress_")) {
+        await handleViewProgressButton(interaction, sourceGuildId);
+      } else if (buttonId.startsWith("view_leaderboard_")) {
+        await handleViewLeaderboardButton(interaction, sourceGuildId);
+      } else if (buttonId.startsWith("refresh_dashboard_")) {
+        await handleRefreshDashboard(interaction);
+      }
   }
 }
 
 // Handle the Log Resource button
-async function handleAddResourcesButton(interaction) {
+async function handleAddResourcesButton(interaction, guildId) {
   try {
     // Get all targets with progress
-    const targets = await TargetModel.getAllWithProgress();
+    const targets = await TargetModel.getAllWithProgress(guildId);
 
     if (targets.length === 0) {
       return interaction.reply({
@@ -87,7 +109,7 @@ async function handleAddResourcesButton(interaction) {
     // Create a select menu for action type selection first
     const selectMenu = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId("action_select")
+        .setCustomId(`action_select_${guildId}`)
         .setPlaceholder("Select an action type")
     );
 
@@ -119,7 +141,7 @@ async function handleAddResourcesButton(interaction) {
 }
 
 // Handle the View Progress button
-async function handleViewProgressButton(interaction) {
+async function handleViewProgressButton(interaction, guildId) {
   try {
     // Execute the progress command
     const progressCommand = interaction.client.commands.get("progress");
@@ -140,8 +162,8 @@ async function handleViewProgressButton(interaction) {
 
     interaction.options = mockOptions;
 
-    // Execute the command
-    await progressCommand.execute(interaction);
+    // Execute the command with the specified guild ID
+    await progressCommand.execute(interaction, guildId);
   } catch (error) {
     console.error("Error in view progress button handler:", error);
     await interaction.reply({
@@ -152,7 +174,7 @@ async function handleViewProgressButton(interaction) {
 }
 
 // Handle the View Leaderboard button
-async function handleViewLeaderboardButton(interaction) {
+async function handleViewLeaderboardButton(interaction, guildId) {
   try {
     // Execute the leaderboard command
     const leaderboardCommand = interaction.client.commands.get("leaderboard");
@@ -173,8 +195,8 @@ async function handleViewLeaderboardButton(interaction) {
 
     interaction.options = mockOptions;
 
-    // Execute the command
-    await leaderboardCommand.execute(interaction);
+    // Execute the command with the specified guild ID
+    await leaderboardCommand.execute(interaction, guildId);
   } catch (error) {
     console.error("Error in view leaderboard button handler:", error);
     await interaction.reply({
@@ -185,7 +207,7 @@ async function handleViewLeaderboardButton(interaction) {
 }
 
 // Handle the View Locations button
-async function handleViewLocationsButton(interaction) {
+async function handleViewLocationsButton(interaction, guildId) {
   try {
     // Execute the location command
     const locationCommand = interaction.client.commands.get("location");
@@ -205,8 +227,8 @@ async function handleViewLocationsButton(interaction) {
 
     interaction.options = mockOptions;
 
-    // Execute the command
-    await locationCommand.execute(interaction);
+    // Execute the command with the specified guild ID
+    await locationCommand.execute(interaction, guildId);
   } catch (error) {
     console.error("Error in view locations button handler:", error);
     await interaction.reply({

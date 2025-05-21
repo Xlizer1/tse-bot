@@ -15,11 +15,16 @@ class DashboardModel {
     }
   }
 
-  // Get all dashboards
-  static async getAll() {
+  // Get all dashboards, optionally filter by guild
+  static async getAll(guildId = null) {
     try {
-      const [rows] = await pool.execute("SELECT * FROM dashboards");
-      return rows;
+      if (guildId) {
+        const [rows] = await pool.execute("SELECT * FROM dashboards WHERE guild_id = ?", [guildId]);
+        return rows;
+      } else {
+        const [rows] = await pool.execute("SELECT * FROM dashboards");
+        return rows;
+      }
     } catch (error) {
       console.error("Error getting dashboards:", error);
       throw error;
@@ -62,22 +67,26 @@ class DashboardModel {
 }
 
 class SettingModel {
-  // Get a setting by key
-  static async get(key) {
+  // Get a setting by key for a specific guild
+  static async get(key, guildId = null) {
     try {
-      const [rows] = await pool.execute(
-        "SELECT * FROM settings WHERE setting_key = ?",
-        [key]
-      );
+      let rows;
+      if (guildId) {
+        [rows] = await pool.execute(
+          "SELECT * FROM settings WHERE setting_key = ? AND guild_id = ?",
+          [key, guildId]
+        );
+      } else {
+        [rows] = await pool.execute(
+          "SELECT * FROM settings WHERE setting_key = ?",
+          [key]
+        );
+      }
 
       if (rows.length === 0) return null;
 
       let parsedValue;
       const settingValue = rows[0].setting_value;
-
-      // Log the raw setting value for debugging
-      // console.log(`Raw setting value for ${key}:`, settingValue);
-      // console.log(`Type of setting value:`, typeof settingValue);
 
       // Handle different possible formats
       if (typeof settingValue === "object") {
@@ -118,38 +127,46 @@ class SettingModel {
     }
   }
 
-  // Set a setting value
-  static async set(key, value) {
+  // Set a setting value for a specific guild
+  static async set(key, value, guildId = null) {
     try {
       // Ensure value is a valid JSON string
       const jsonValue =
         typeof value === "string" ? value : JSON.stringify(value);
 
-      // Use INSERT ... ON DUPLICATE KEY UPDATE
-      const [result] = await pool.execute(
-        "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
-        [key, jsonValue, jsonValue]
-      );
-
-      return result.affectedRows > 0;
+      if (guildId) {
+        // Use INSERT ... ON DUPLICATE KEY UPDATE with guild_id
+        const [result] = await pool.execute(
+          "INSERT INTO settings (setting_key, setting_value, guild_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+          [key, jsonValue, guildId, jsonValue]
+        );
+        return result.affectedRows > 0;
+      } else {
+        // For backward compatibility
+        const [result] = await pool.execute(
+          "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+          [key, jsonValue, jsonValue]
+        );
+        return result.affectedRows > 0;
+      }
     } catch (error) {
       console.error(`Error setting ${key}:`, error);
       throw error;
     }
   }
 
-  // Get auto report settings
-  static async getAutoReport() {
+  // Get auto report settings for a specific guild
+  static async getAutoReport(guildId = null) {
     const defaultSettings = {
       enabled: false,
       channelId: null,
       time: null,
-      guildId: null,
+      guildId: guildId,
       lastReportDate: null,
     };
 
     try {
-      const settings = await this.get("autoReport");
+      const settings = await this.get("autoReport", guildId);
       return settings || defaultSettings;
     } catch (error) {
       console.error("Error retrieving auto report settings:", error);
@@ -157,7 +174,7 @@ class SettingModel {
     }
   }
 
-  // Set auto report settings
+  // Set auto report settings for a specific guild
   static async setAutoReport(settings) {
     // Ensure all expected fields are present
     const completeSettings = {
@@ -168,7 +185,7 @@ class SettingModel {
       lastReportDate: settings.lastReportDate ?? null,
     };
 
-    return await this.set("autoReport", completeSettings);
+    return await this.set("autoReport", completeSettings, settings.guildId);
   }
 }
 

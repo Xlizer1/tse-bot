@@ -57,8 +57,10 @@ module.exports = {
         )
     ),
 
-  async execute(interaction) {
+  async execute(interaction, guildId) {
     try {
+      // Use guild ID from the interaction if not explicitly provided
+      const serverGuildId = guildId || interaction.guild.id;
       const subcommand = interaction.options.getSubcommand();
 
       if (subcommand === "list") {
@@ -72,7 +74,7 @@ module.exports = {
 
         if (actionType === "all") {
           // Get all resources grouped by type
-          const groupedResources = await ResourceModel.getGroupedResources();
+          const groupedResources = await ResourceModel.getGroupedResources(serverGuildId);
 
           // Add mining resources
           if (groupedResources.mining && groupedResources.mining.length > 0) {
@@ -108,7 +110,7 @@ module.exports = {
           }
         } else {
           // Get specific action type resources
-          const resources = await ResourceModel.getByActionType(actionType);
+          const resources = await ResourceModel.getByActionType(actionType, serverGuildId);
 
           embed.addFields({
             name: `${
@@ -142,7 +144,8 @@ module.exports = {
         // Check if resource already exists
         const existingResource = await ResourceModel.getByValueAndType(
           value,
-          actionType
+          actionType,
+          serverGuildId
         );
 
         if (existingResource) {
@@ -153,7 +156,7 @@ module.exports = {
         }
 
         // Add the resource (with auto-generated emoji)
-        await ResourceModel.add(name, value, actionType);
+        await ResourceModel.add(name, value, actionType, serverGuildId);
 
         await interaction.reply({
           content: `Added "${name}" (${value}) to the ${actionType} resources list.`,

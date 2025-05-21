@@ -19,22 +19,22 @@ function createProgressBar(percentage, length = 10) {
 // Get emoji for action type
 function getActionEmoji(actionName, actionEmoji = null) {
   if (actionEmoji) return actionEmoji;
-  
+
   const emojiMap = {
-    "mine": "⛏️",
-    "salvage": "🏭",
-    "haul": "🚚",
-    "earn": "💰"
+    mine: "⛏️",
+    salvage: "🏭",
+    haul: "🚚",
+    earn: "💰",
   };
-  
+
   return emojiMap[actionName] || "📦";
 }
 
 // Generate insights and stats
-async function generateDashboardInsights() {
+async function generateDashboardInsights(guildId) {
   try {
     // Get all targets
-    const targets = await TargetModel.getAllWithProgress();
+    const targets = await TargetModel.getAllWithProgress(guildId);
     const actionTypes = await ActionTypeModel.getAll();
     const topContributors = await ContributionModel.getTopContributors(3);
 
@@ -82,12 +82,12 @@ async function generateDashboardInsights() {
       resourceBreakdown: Object.entries(resourceBreakdown).map(
         ([action, data]) => {
           // Find the corresponding action type
-          const actionType = actionTypes.find(at => at.name === action) || {
+          const actionType = actionTypes.find((at) => at.name === action) || {
             display_name: action.charAt(0).toUpperCase() + action.slice(1),
             emoji: null,
-            unit: "SCU"
+            unit: "SCU",
           };
-          
+
           return {
             action,
             displayName: actionType.display_name,
@@ -113,14 +113,14 @@ async function generateDashboardInsights() {
 }
 
 // Create a progress embed based on targets
-async function createProgressEmbed() {
+async function createProgressEmbed(guildId) {
   const embed = new EmbedBuilder()
     .setColor(0x0099ff)
     .setTitle("🚀 Terra Star Expeditionary Dashboard")
     .setTimestamp();
 
   try {
-    const insights = await generateDashboardInsights();
+    const insights = await generateDashboardInsights(guildId);
 
     if (!insights) {
       embed.setDescription(
@@ -175,16 +175,22 @@ async function createProgressEmbed() {
     if (insights.closestTarget && insights.furthestTarget) {
       const closestTarget = insights.closestTarget;
       const furthestTarget = insights.furthestTarget;
-      
+
       // Get unit for each target
       const closestUnit = closestTarget.unit || "SCU";
       const furthestUnit = furthestTarget.unit || "SCU";
-      
-      const resourceName = target => target.resource_name || target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
-      
+
+      const resourceName = (target) =>
+        target.resource_name ||
+        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+
       const targetsInsight = [
-        `**🎉 Closest Target**: ${resourceName(closestTarget)} (${closestTarget.percentage}%)`,
-        `**🏃 Furthest Target**: ${resourceName(furthestTarget)} (${furthestTarget.percentage}%)`,
+        `**🎉 Closest Target**: ${resourceName(closestTarget)} (${
+          closestTarget.percentage
+        }%)`,
+        `**🏃 Furthest Target**: ${resourceName(furthestTarget)} (${
+          furthestTarget.percentage
+        }%)`,
       ].join("\n");
 
       embed.addFields({
@@ -208,19 +214,20 @@ async function updateDashboards(client) {
     // Check if dashboards table exists
     try {
       // Get all dashboard records
-      const dashboards = await DashboardModel.getAll();
+      const [rows] = await client.db.execute(`
+        SELECT d.*, 
+               IFNULL(d.source_guild_id, d.guild_id) AS data_guild_id 
+        FROM dashboards d
+      `);
 
       // Check if there are any dashboards
-      if (dashboards.length === 0) return;
-
-      // Create updated embed
-      const updatedEmbed = await createProgressEmbed();
+      if (rows.length === 0) return;
 
       // Update each dashboard
       const validDashboards = [];
 
-      for (const dashboard of dashboards) {
-        const { guild_id, channel_id, message_id } = dashboard;
+      for (const dashboard of rows) {
+        const { guild_id, channel_id, message_id, data_guild_id } = dashboard;
 
         try {
           // Get guild
@@ -237,8 +244,32 @@ async function updateDashboards(client) {
             .catch(() => null);
           if (!message) {
             // Remove invalid dashboard
-            await DashboardModel.remove(message_id);
+            await client.db.execute(
+              "DELETE FROM dashboards WHERE message_id = ?",
+              [message_id]
+            );
             continue;
+          }
+
+          // Create updated embed
+          const updatedEmbed = await createProgressEmbed(data_guild_id);
+
+          // Add source attribution for shared dashboards
+          if (data_guild_id !== guild_id) {
+            let sourceName = data_guild_id;
+            try {
+              const sourceGuild = await client.guilds.fetch(data_guild_id);
+              if (sourceGuild) {
+                sourceName = sourceGuild.name;
+              }
+            } catch (err) {
+              console.log(`Could not fetch guild info for ${data_guild_id}`);
+            }
+
+            updatedEmbed.setFooter({
+              text: `Data from: ${sourceName} | ID: ${data_guild_id}`,
+              iconURL: guild.iconURL({ dynamic: true }),
+            });
           }
 
           // Update the message
@@ -249,7 +280,10 @@ async function updateDashboards(client) {
         } catch (error) {
           console.error(`Error updating dashboard ${message_id}:`, error);
           // Remove problematic dashboard
-          await DashboardModel.remove(message_id);
+          await client.db.execute(
+            "DELETE FROM dashboards WHERE message_id = ?",
+            [message_id]
+          );
         }
       }
     } catch (error) {
@@ -269,8 +303,36 @@ async function updateDashboards(client) {
 // Handle dashboard refresh button
 async function handleRefreshDashboard(interaction) {
   try {
+    // Check if this is a shared dashboard button (format: refresh_dashboard_GUILDID)
+    const buttonId = interaction.customId;
+    let sourceGuildId = interaction.guild.id;
+
+    if (buttonId.startsWith("refresh_dashboard_")) {
+      sourceGuildId = buttonId.replace("refresh_dashboard_", "");
+    }
+
     // Create updated embed
-    const updatedEmbed = await createProgressEmbed();
+    const updatedEmbed = await createProgressEmbed(sourceGuildId);
+
+    // Add source attribution for shared dashboards
+    if (sourceGuildId !== interaction.guild.id) {
+      let sourceName = sourceGuildId;
+      try {
+        const sourceGuild = await interaction.client.guilds.fetch(
+          sourceGuildId
+        );
+        if (sourceGuild) {
+          sourceName = sourceGuild.name;
+        }
+      } catch (err) {
+        console.log(`Could not fetch guild info for ${sourceGuildId}`);
+      }
+
+      updatedEmbed.setFooter({
+        text: `Data from: ${sourceName} | ID: ${sourceGuildId}`,
+        iconURL: interaction.guild.iconURL({ dynamic: true }),
+      });
+    }
 
     // Update the message
     await interaction.message.edit({ embeds: [updatedEmbed] });
