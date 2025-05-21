@@ -1,12 +1,16 @@
 const { pool } = require("../database");
+const ActionTypeModel = require("./actionType");
 
 class ResourceModel {
-  // Get all resources
+  // Get all resources with action type info
   static async getAll() {
     try {
-      const [rows] = await pool.execute(
-        "SELECT * FROM resources ORDER BY action_type, name"
-      );
+      const [rows] = await pool.execute(`
+        SELECT r.*, at.name as action_type_name, at.display_name as action_display_name, at.unit, at.emoji as action_emoji
+        FROM resources r
+        JOIN action_types at ON r.action_type_id = at.id
+        ORDER BY at.display_name, r.name
+      `);
       return rows;
     } catch (error) {
       console.error("Error getting resources:", error);
@@ -17,8 +21,19 @@ class ResourceModel {
   // Get resources by action type
   static async getByActionType(actionType) {
     try {
+      // First, get the action type ID
+      const actionTypeData = await ActionTypeModel.getByName(actionType);
+      
+      if (!actionTypeData) {
+        throw new Error(`Action type "${actionType}" not found`);
+      }
+      
       const [rows] = await pool.execute(
-        "SELECT * FROM resources WHERE action_type = ? ORDER BY name",
+        `SELECT r.*, at.name as action_type_name, at.display_name as action_display_name, at.unit, at.emoji as action_emoji
+         FROM resources r
+         JOIN action_types at ON r.action_type_id = at.id
+         WHERE at.name = ? 
+         ORDER BY r.name`,
         [actionType]
       );
       return rows;
@@ -31,8 +46,18 @@ class ResourceModel {
   // Get resource by value and action type
   static async getByValueAndType(value, actionType) {
     try {
+      // First, get the action type ID
+      const actionTypeData = await ActionTypeModel.getByName(actionType);
+      
+      if (!actionTypeData) {
+        throw new Error(`Action type "${actionType}" not found`);
+      }
+      
       const [rows] = await pool.execute(
-        "SELECT * FROM resources WHERE value = ? AND action_type = ?",
+        `SELECT r.*, at.name as action_type_name, at.display_name as action_display_name, at.unit, at.emoji as action_emoji
+         FROM resources r
+         JOIN action_types at ON r.action_type_id = at.id
+         WHERE r.value = ? AND at.name = ?`,
         [value, actionType]
       );
       return rows[0] || null;
@@ -43,11 +68,18 @@ class ResourceModel {
   }
 
   // Add a new resource
-  static async add(name, value, actionType) {
+  static async add(name, value, actionType, emoji = null) {
     try {
+      // First, get the action type ID
+      const actionTypeData = await ActionTypeModel.getByName(actionType);
+      
+      if (!actionTypeData) {
+        throw new Error(`Action type "${actionType}" not found`);
+      }
+      
       const [result] = await pool.execute(
-        "INSERT INTO resources (name, value, action_type) VALUES (?, ?, ?)",
-        [name, value, actionType]
+        "INSERT INTO resources (name, value, action_type_id, emoji) VALUES (?, ?, ?, ?)",
+        [name, value, actionTypeData.id, emoji]
       );
       return result.insertId;
     } catch (error) {
@@ -59,9 +91,16 @@ class ResourceModel {
   // Remove a resource
   static async remove(value, actionType) {
     try {
+      // First, get the action type ID
+      const actionTypeData = await ActionTypeModel.getByName(actionType);
+      
+      if (!actionTypeData) {
+        throw new Error(`Action type "${actionType}" not found`);
+      }
+      
       const [result] = await pool.execute(
-        "DELETE FROM resources WHERE value = ? AND action_type = ?",
-        [value, actionType]
+        "DELETE FROM resources WHERE value = ? AND action_type_id = ?",
+        [value, actionTypeData.id]
       );
       return result.affectedRows > 0;
     } catch (error) {
@@ -81,30 +120,46 @@ class ResourceModel {
   // Get resources grouped by action type
   static async getGroupedResources() {
     try {
-      const [rows] = await pool.execute(
-        "SELECT * FROM resources ORDER BY action_type, name"
-      );
-
-      const grouped = {
-        mining: [],
-        salvage: [],
-        haul: [],
-      };
-
-      rows.forEach((resource) => {
-        if (grouped[resource.action_type]) {
-          grouped[resource.action_type].push({
+      // Get all action types
+      const actionTypes = await ActionTypeModel.getAll();
+      
+      // Create result structure
+      const grouped = {};
+      actionTypes.forEach(type => {
+        grouped[type.name] = [];
+      });
+      
+      // Get all resources with action types
+      const [rows] = await pool.execute(`
+        SELECT r.*, at.name as action_type_name, at.display_name as action_display_name, at.unit, at.emoji as action_emoji
+        FROM resources r
+        JOIN action_types at ON r.action_type_id = at.id
+        ORDER BY r.name
+      `);
+      
+      // Group resources by action type
+      rows.forEach(resource => {
+        if (grouped[resource.action_type_name]) {
+          grouped[resource.action_type_name].push({
+            id: resource.id,
             name: resource.name,
             value: resource.value,
+            emoji: resource.emoji || resource.action_emoji,
+            unit: resource.unit
           });
         }
       });
-
+      
       return grouped;
     } catch (error) {
       console.error("Error getting grouped resources:", error);
       throw error;
     }
+  }
+
+  // Backwards compatibility method for older code
+  static async getByValueAndActionType(value, actionType) {
+    return this.getByValueAndType(value, actionType);
   }
 }
 

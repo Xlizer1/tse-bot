@@ -2,6 +2,7 @@ const { EmbedBuilder, MessageFlags } = require("discord.js");
 const TargetModel = require("./models/target");
 const ContributionModel = require("./models/contribution");
 const ResourceModel = require("./models/resource");
+const ActionTypeModel = require("./models/actionType");
 const { DashboardModel } = require("./models/dashboard");
 
 // Create emoji-based visuals for progress
@@ -15,12 +16,26 @@ function createProgressBar(percentage, length = 10) {
   return filledEmoji.repeat(filledLength) + emptyEmoji.repeat(emptyLength);
 }
 
+// Get emoji for action type
+function getActionEmoji(actionName, actionEmoji = null) {
+  if (actionEmoji) return actionEmoji;
+  
+  const emojiMap = {
+    "mine": "⛏️",
+    "salvage": "🏭",
+    "haul": "🚚",
+    "earn": "💰"
+  };
+  
+  return emojiMap[actionName] || "📦";
+}
+
 // Generate insights and stats
 async function generateDashboardInsights() {
   try {
     // Get all targets
     const targets = await TargetModel.getAllWithProgress();
-    const resources = await ResourceModel.getAll();
+    const actionTypes = await ActionTypeModel.getAll();
     const topContributors = await ContributionModel.getTopContributors(3);
 
     // Calculate overall stats
@@ -65,13 +80,25 @@ async function generateDashboardInsights() {
       overallProgress,
       progressBar: createProgressBar(overallProgress),
       resourceBreakdown: Object.entries(resourceBreakdown).map(
-        ([action, data]) => ({
-          action,
-          percentage: Math.floor((data.current / data.total) * 100),
-          progressBar: createProgressBar(
-            Math.floor((data.current / data.total) * 100)
-          ),
-        })
+        ([action, data]) => {
+          // Find the corresponding action type
+          const actionType = actionTypes.find(at => at.name === action) || {
+            display_name: action.charAt(0).toUpperCase() + action.slice(1),
+            emoji: null,
+            unit: "SCU"
+          };
+          
+          return {
+            action,
+            displayName: actionType.display_name,
+            emoji: actionType.emoji,
+            unit: actionType.unit,
+            percentage: Math.floor((data.current / data.total) * 100),
+            progressBar: createProgressBar(
+              Math.floor((data.current / data.total) * 100)
+            ),
+          };
+        }
       ),
       closestTarget: sortedTargets[0],
       furthestTarget: sortedTargets[sortedTargets.length - 1],
@@ -107,7 +134,7 @@ async function createProgressEmbed() {
       `**📊 Overall Progress**: ${insights.progressBar} ${insights.overallProgress}%`,
       `**🎯 Total Targets**: ${insights.totalTargets}`,
       `**💎 Unique Resource Types**: ${insights.uniqueResourceTypes}`,
-      `**📦 Total Contributions**: ${insights.totalContributions} SCU`,
+      `**📦 Total Contributions**: ${insights.totalContributions}`,
     ].join("\n");
 
     embed.setDescription(description);
@@ -116,7 +143,7 @@ async function createProgressEmbed() {
     const resourceBreakdownField = insights.resourceBreakdown
       .map(
         (rb) =>
-          `**${rb.action.charAt(0).toUpperCase() + rb.action.slice(1)}**: ${
+          `${getActionEmoji(rb.action, rb.emoji)} **${rb.displayName}**: ${
             rb.progressBar
           } ${rb.percentage}%`
       )
@@ -124,7 +151,7 @@ async function createProgressEmbed() {
 
     embed.addFields({
       name: "📈 Resource Type Breakdown",
-      value: resourceBreakdownField,
+      value: resourceBreakdownField || "No active targets",
     });
 
     // Top Contributors
@@ -134,7 +161,7 @@ async function createProgressEmbed() {
           (contributor, index) =>
             `${index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"} ${
               contributor.username
-            }: ${contributor.total_amount} SCU`
+            }: ${contributor.total_amount} total contributions`
         )
         .join("\n");
 
@@ -146,15 +173,18 @@ async function createProgressEmbed() {
 
     // Targets Insights
     if (insights.closestTarget && insights.furthestTarget) {
+      const closestTarget = insights.closestTarget;
+      const furthestTarget = insights.furthestTarget;
+      
+      // Get unit for each target
+      const closestUnit = closestTarget.unit || "SCU";
+      const furthestUnit = furthestTarget.unit || "SCU";
+      
+      const resourceName = target => target.resource_name || target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+      
       const targetsInsight = [
-        `**🎉 Closest Target**: ${
-          insights.closestTarget.resource_name ||
-          insights.closestTarget.resource
-        } (${insights.closestTarget.percentage}%)`,
-        `**🏃 Furthest Target**: ${
-          insights.furthestTarget.resource_name ||
-          insights.furthestTarget.resource
-        } (${insights.furthestTarget.percentage}%)`,
+        `**🎉 Closest Target**: ${resourceName(closestTarget)} (${closestTarget.percentage}%)`,
+        `**🏃 Furthest Target**: ${resourceName(furthestTarget)} (${furthestTarget.percentage}%)`,
       ].join("\n");
 
       embed.addFields({

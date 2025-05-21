@@ -5,14 +5,15 @@ class TargetModel {
   static async getAllWithProgress() {
     try {
       const [rows] = await pool.execute(`
-        SELECT t.*, p.current_amount, r.name as resource_name
+        SELECT t.*, p.current_amount, r.name as resource_name, r.emoji as resource_emoji, 
+               at.unit, at.display_name as action_display_name, at.emoji as action_emoji
         FROM targets t
         LEFT JOIN progress p ON t.id = p.target_id
+        LEFT JOIN action_types at ON at.name = t.action
         LEFT JOIN resources r ON t.resource = r.value AND 
           CASE 
-            WHEN t.action = 'mine' THEN r.action_type = 'mining'
-            WHEN t.action = 'salvage' THEN r.action_type = 'salvage'
-            WHEN t.action = 'haul' THEN r.action_type = 'haul'
+            WHEN t.action = at.name THEN r.action_type_id = (SELECT id FROM action_types WHERE name = t.action) 
+            ELSE 1=0
           END
         ORDER BY t.action, t.resource
       `);
@@ -27,10 +28,14 @@ class TargetModel {
   // Get a specific target by action and resource
   static async getByActionAndResource(action, resource) {
     try {
-      const [rows] = await pool.execute(
-        "SELECT t.*, p.current_amount FROM targets t LEFT JOIN progress p ON t.id = p.target_id WHERE t.action = ? AND t.resource = ?",
-        [action, resource]
-      );
+      const [rows] = await pool.execute(`
+        SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
+        FROM targets t 
+        LEFT JOIN progress p ON t.id = p.target_id
+        LEFT JOIN action_types at ON at.name = t.action
+        WHERE t.action = ? AND t.resource = ?
+      `, [action, resource]);
+      
       return rows[0] || null;
     } catch (error) {
       console.error(`Error getting target for ${action} ${resource}:`, error);
@@ -41,10 +46,14 @@ class TargetModel {
   // Get target by ID
   static async getById(id) {
     try {
-      const [rows] = await pool.execute(
-        "SELECT t.*, p.current_amount FROM targets t LEFT JOIN progress p ON t.id = p.target_id WHERE t.id = ?",
-        [id]
-      );
+      const [rows] = await pool.execute(`
+        SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
+        FROM targets t 
+        LEFT JOIN progress p ON t.id = p.target_id
+        LEFT JOIN action_types at ON at.name = t.action
+        WHERE t.id = ?
+      `, [id]);
+      
       return rows[0] || null;
     } catch (error) {
       console.error(`Error getting target with ID ${id}:`, error);
@@ -58,6 +67,16 @@ class TargetModel {
 
     try {
       await connection.beginTransaction();
+
+      // Verify action exists
+      const [actionExists] = await connection.execute(
+        "SELECT COUNT(*) as count FROM action_types WHERE name = ?",
+        [action]
+      );
+      
+      if (actionExists[0].count === 0) {
+        throw new Error(`Action type "${action}" does not exist`);
+      }
 
       // Create the target
       const [result] = await connection.execute(
@@ -166,11 +185,14 @@ class TargetModel {
       return {
         id: target.id,
         action: target.action,
+        actionDisplay: target.action_display_name || target.action,
         resource: target.resource,
         resourceName: target.resource_name || target.resource,
         target: target.target_amount,
         current: current,
         percentage: percentage,
+        unit: target.unit || "SCU",
+        emoji: target.resource_emoji || target.action_emoji || null
       };
     });
   }

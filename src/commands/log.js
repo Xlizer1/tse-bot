@@ -2,6 +2,7 @@ const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const TargetModel = require("../models/target");
 const ContributionModel = require("../models/contribution");
 const ResourceModel = require("../models/resource");
+const ActionTypeModel = require("../models/actionType");
 const { updateDashboards } = require("../dashboard-updater");
 
 module.exports = {
@@ -13,22 +14,19 @@ module.exports = {
         .setName("action")
         .setDescription("Action type")
         .setRequired(true)
-        .addChoices(
-          { name: "Mine", value: "mine" },
-          { name: "Salvage", value: "salvage" },
-          { name: "Haul", value: "haul" }
-        )
+        .setAutocomplete(true)
     )
     .addStringOption((option) =>
       option
         .setName("resource")
         .setDescription("Resource type")
         .setRequired(true)
+        .setAutocomplete(true)
     )
     .addIntegerOption((option) =>
       option
         .setName("amount")
-        .setDescription("Amount in SCU")
+        .setDescription("Amount")
         .setRequired(true)
         .setMinValue(1)
     )
@@ -74,26 +72,21 @@ module.exports = {
         (current / updatedTarget.target_amount) * 100
       );
 
-      // Get resource name for display
-      const resourceCategory =
-        action === "mine"
-          ? "mining"
-          : action === "salvage"
-          ? "salvage"
-          : "haul";
+      // Get action type for display and unit
+      const actionType = await ActionTypeModel.getByName(action);
+      const unit = actionType ? actionType.unit : "SCU";
+      const actionDisplay = actionType ? actionType.display_name : action.charAt(0).toUpperCase() + action.slice(1);
 
-      const resourceInfo = await ResourceModel.getByValueAndType(
-        resource,
-        resourceCategory
-      );
+      // Get resource name for display
+      const resourceInfo = await ResourceModel.getByValueAndType(resource, action);
       const resourceName = resourceInfo
         ? resourceInfo.name
         : resource.charAt(0).toUpperCase() + resource.slice(1);
 
       // Reply with acknowledgment and progress
       await interaction.reply(
-        `Logged: ${interaction.user.username} ${action}d ${amount} SCU of ${resourceName} at ${location}\n` +
-          `Progress: ${current}/${updatedTarget.target_amount} SCU (${percentage}%)`
+        `Logged: ${interaction.user.username} ${actionDisplay}d ${amount} ${unit} of ${resourceName} at ${location}\n` +
+          `Progress: ${current}/${updatedTarget.target_amount} ${unit} (${percentage}%)`
       );
 
       // Update dashboards with the new information
@@ -106,4 +99,57 @@ module.exports = {
       });
     }
   },
+
+  // Autocomplete handler for action and resource options
+  async autocomplete(interaction) {
+    const focusedOption = interaction.options.getFocused(true);
+    
+    try {
+      if (focusedOption.name === "action") {
+        // Get all action types
+        const actionTypes = await ActionTypeModel.getAll();
+        
+        const filtered = actionTypes.filter(type => 
+          type.name.toLowerCase().includes(focusedOption.value.toLowerCase()) ||
+          type.display_name.toLowerCase().includes(focusedOption.value.toLowerCase())
+        );
+        
+        await interaction.respond(
+          filtered.map(type => ({
+            name: `${type.emoji || ''} ${type.display_name} (${type.unit})`,
+            value: type.name
+          }))
+        );
+      } else if (focusedOption.name === "resource") {
+        // Get the selected action (if any)
+        const selectedAction = interaction.options.getString("action");
+        
+        let resources = [];
+        
+        if (selectedAction) {
+          // Get resources for this action type
+          resources = await ResourceModel.getByActionType(selectedAction);
+        } else {
+          // Get all resources
+          resources = await ResourceModel.getAll();
+        }
+        
+        const filtered = resources.filter(resource => 
+          resource.name.toLowerCase().includes(focusedOption.value.toLowerCase()) ||
+          resource.value.toLowerCase().includes(focusedOption.value.toLowerCase())
+        );
+        
+        await interaction.respond(
+          filtered.map(resource => ({
+            name: `${resource.name}`,
+            value: resource.value
+          }))
+        );
+      }
+    } catch (error) {
+      console.error('Error during log command autocomplete:', error);
+      // Return empty results if there's an error
+      await interaction.respond([]);
+    }
+  }
 };

@@ -10,6 +10,7 @@ const {
 const ResourceModel = require("./models/resource");
 const TargetModel = require("./models/target");
 const ContributionModel = require("./models/contribution");
+const ActionTypeModel = require("./models/actionType");
 const {
   handleRefreshDashboard,
   updateDashboards,
@@ -61,31 +62,50 @@ async function handleAddResourcesButton(interaction) {
       });
     }
 
-    // Create a select menu for resource selection
+    // Group targets by action type
+    const actionTypes = await ActionTypeModel.getAll();
+    const actionMap = new Map();
+    
+    actionTypes.forEach(type => {
+      actionMap.set(type.name, {
+        id: type.id,
+        name: type.name,
+        displayName: type.display_name,
+        unit: type.unit,
+        emoji: type.emoji,
+        targets: []
+      });
+    });
+    
+    // Add targets to their respective action types
+    targets.forEach(target => {
+      if (actionMap.has(target.action)) {
+        actionMap.get(target.action).targets.push(target);
+      }
+    });
+    
+    // Create a select menu for action type selection first
     const selectMenu = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
-        .setCustomId("resource_select")
-        .setPlaceholder("Select a resource to log")
+        .setCustomId("action_select")
+        .setPlaceholder("Select an action type")
     );
 
-    // Add options for each target
-    targets.forEach((target) => {
-      const capitalized = (word) =>
-        word.charAt(0).toUpperCase() + word.slice(1);
-      const resourceName =
-        target.resource_name ||
-        target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
-
-      selectMenu.components[0].addOptions({
-        label: `${capitalized(target.action)} ${resourceName}`,
-        description: `Target: ${target.target_amount} SCU`,
-        value: target.id.toString(),
-      });
+    // Add options for each action type that has targets
+    actionMap.forEach(action => {
+      if (action.targets.length > 0) {
+        selectMenu.components[0].addOptions({
+          label: action.displayName,
+          description: `${action.targets.length} ${action.targets.length === 1 ? 'target' : 'targets'} (${action.unit})`,
+          value: action.name,
+          emoji: action.emoji
+        });
+      }
     });
 
     // Send the selection menu
     await interaction.reply({
-      content: "Please select which resource you want to log:",
+      content: "Please select which action type you want to log:",
       components: [selectMenu],
       flags: MessageFlags.Ephemeral,
     });
@@ -115,6 +135,7 @@ async function handleViewProgressButton(interaction) {
     const mockOptions = {
       getString: () => null,
       getInteger: () => null,
+      getFocused: () => null
     };
 
     interaction.options = mockOptions;
@@ -147,6 +168,7 @@ async function handleViewLeaderboardButton(interaction) {
     const mockOptions = {
       getString: () => null,
       getInteger: () => null,
+      getFocused: () => null
     };
 
     interaction.options = mockOptions;
@@ -178,6 +200,7 @@ async function handleViewLocationsButton(interaction) {
     // Create a mock interaction with no options
     const mockOptions = {
       getString: () => null,
+      getFocused: () => null
     };
 
     interaction.options = mockOptions;
@@ -193,7 +216,7 @@ async function handleViewLocationsButton(interaction) {
   }
 }
 
-// Handle select menu interaction for resource selection
+// Handle select menu interaction for action and resource selection
 async function handleSelectMenuInteraction(interaction) {
   // Handle admin select menus
   if (interaction.customId.startsWith("admin_")) {
@@ -203,65 +226,105 @@ async function handleSelectMenuInteraction(interaction) {
     return;
   }
 
-  if (interaction.customId === "resource_select") {
+  if (interaction.customId === "action_select") {
     try {
-      const targetId = interaction.values[0];
-
+      const actionType = interaction.values[0];
+      
+      // Get all targets for this action type
+      const targets = await TargetModel.getAllWithProgress();
+      const filteredTargets = targets.filter(target => target.action === actionType);
+      
+      if (filteredTargets.length === 0) {
+        return interaction.reply({
+          content: "No targets found for this action type.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      
+      // Get the action type info
+      const actionTypeInfo = await ActionTypeModel.getByName(actionType);
+      
+      // Create a select menu for resource selection based on action type
+      const selectMenu = new ActionRowBuilder().addComponents(
+        new StringSelectMenuBuilder()
+          .setCustomId("resource_select")
+          .setPlaceholder(`Select a ${actionTypeInfo.display_name.toLowerCase()} resource`)
+      );
+      
+      // Add options for each target within this action type
+      filteredTargets.forEach(target => {
+        const resourceName = target.resource_name || 
+                            target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+        
+        selectMenu.components[0].addOptions({
+          label: resourceName,
+          description: `Target: ${target.target_amount} ${target.unit || actionTypeInfo.unit}`,
+          value: `${target.action}_${target.resource}`,
+        });
+      });
+      
+      // Send the resource selection menu
+      await interaction.update({
+        content: `Please select which ${actionTypeInfo.display_name.toLowerCase()} resource you want to log:`,
+        components: [selectMenu],
+      });
+    } catch (error) {
+      console.error("Error handling action selection:", error);
+      await interaction.reply({
+        content: "An error occurred while processing your selection.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+  } else if (interaction.customId === "resource_select") {
+    try {
+      const [action, resource] = interaction.values[0].split('_');
+      
       // Get target details
-      const target = await TargetModel.getById(targetId);
-
+      const target = await TargetModel.getByActionAndResource(action, resource);
+      
       if (!target) {
         return interaction.reply({
           content: "The selected target could not be found. Please try again.",
           flags: MessageFlags.Ephemeral,
         });
       }
-
-      // Get resource details
-      const resourceCategory =
-        target.action === "mine"
-          ? "mining"
-          : target.action === "salvage"
-          ? "salvage"
-          : "haul";
-
-      const resource = await ResourceModel.getByValueAndType(
-        target.resource,
-        resourceCategory
-      );
-      const resourceName = resource
-        ? resource.name
-        : target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
-
+      
+      // Get action type info for unit
+      const actionType = await ActionTypeModel.getByName(action);
+      const unit = target.unit || (actionType ? actionType.unit : "SCU");
+      const actionDisplay = target.action_display_name || 
+                          (actionType ? actionType.display_name : action.charAt(0).toUpperCase() + action.slice(1));
+      
+      // Get resource name
+      const resourceInfo = await ResourceModel.getByValueAndType(resource, action);
+      const resourceName = target.resource_name || 
+                           (resourceInfo ? resourceInfo.name : resource.charAt(0).toUpperCase() + resource.slice(1));
+      
       // Create a modal for inputting details
       const modal = new ModalBuilder()
-        .setCustomId(`add_modal_${targetId}`)
-        .setTitle(
-          `Log ${
-            target.action.charAt(0).toUpperCase() + target.action.slice(1)
-          } ${resourceName}`
-        );
-
+        .setCustomId(`add_modal_${target.id}`)
+        .setTitle(`Log ${actionDisplay} ${resourceName}`);
+      
       // Add input fields
       const amountInput = new TextInputBuilder()
         .setCustomId("amount")
-        .setLabel("Amount (SCU)")
+        .setLabel(`Amount (${unit})`)
         .setStyle(TextInputStyle.Short)
-        .setPlaceholder("Enter the amount in SCU")
+        .setPlaceholder(`Enter the amount in ${unit}`)
         .setRequired(true);
-
+      
       const locationInput = new TextInputBuilder()
         .setCustomId("location")
         .setLabel("Location")
         .setStyle(TextInputStyle.Short)
         .setPlaceholder("Enter where you delivered or found the resource")
         .setRequired(true);
-
+      
       const row1 = new ActionRowBuilder().addComponents(amountInput);
       const row2 = new ActionRowBuilder().addComponents(locationInput);
-
+      
       modal.addComponents(row1, row2);
-
+      
       // Show the modal
       await interaction.showModal(modal);
     } catch (error) {
@@ -323,21 +386,16 @@ async function handleModalSubmitInteraction(interaction) {
       // Get updated target with current progress
       const updatedTarget = await TargetModel.getById(targetId);
 
+      // Get action type info for unit and display name
+      const actionType = await ActionTypeModel.getByName(target.action);
+      const unit = target.unit || (actionType ? actionType.unit : "SCU");
+      const actionDisplay = target.action_display_name || 
+                          (actionType ? actionType.display_name : target.action.charAt(0).toUpperCase() + target.action.slice(1));
+      
       // Get resource name
-      const resourceCategory =
-        target.action === "mine"
-          ? "mining"
-          : target.action === "salvage"
-          ? "salvage"
-          : "haul";
-
-      const resource = await ResourceModel.getByValueAndType(
-        target.resource,
-        resourceCategory
-      );
-      const resourceName = resource
-        ? resource.name
-        : target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+      const resourceInfo = await ResourceModel.getByValueAndType(target.resource, target.action);
+      const resourceName = target.resource_name || 
+                           (resourceInfo ? resourceInfo.name : target.resource.charAt(0).toUpperCase() + target.resource.slice(1));
 
       // Calculate progress percentage
       const current = updatedTarget.current_amount || 0;
@@ -348,8 +406,8 @@ async function handleModalSubmitInteraction(interaction) {
       // Reply with acknowledgment and progress
       await interaction.reply({
         content:
-          `Logged: You ${target.action}d ${amount} SCU of ${resourceName} at ${location}\n` +
-          `Progress: ${current}/${updatedTarget.target_amount} SCU (${percentage}%)`,
+          `Logged: You ${actionDisplay.toLowerCase()}d ${amount} ${unit} of ${resourceName} at ${location}\n` +
+          `Progress: ${current}/${updatedTarget.target_amount} ${unit} (${percentage}%)`,
         flags: MessageFlags.Ephemeral,
       });
 

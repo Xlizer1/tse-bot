@@ -5,6 +5,7 @@ const {
 } = require("discord.js");
 const TargetModel = require("../models/target");
 const ContributionModel = require("../models/contribution");
+const ActionTypeModel = require("../models/actionType");
 
 module.exports = {
   data: new SlashCommandBuilder()
@@ -15,12 +16,7 @@ module.exports = {
         .setName("filter")
         .setDescription("Filter by action type")
         .setRequired(false)
-        .addChoices(
-          { name: "All", value: "all" },
-          { name: "Mine", value: "mine" },
-          { name: "Salvage", value: "salvage" },
-          { name: "Haul", value: "haul" }
-        )
+        .setAutocomplete(true)
     )
     .addStringOption((option) =>
       option
@@ -59,6 +55,9 @@ module.exports = {
         });
       }
 
+      // Get all action types for filtering
+      const actionTypes = await ActionTypeModel.getAll();
+      
       // Get all targets with progress
       const targets = await TargetModel.getAllWithProgress();
 
@@ -76,16 +75,23 @@ module.exports = {
         .setTimestamp();
 
       // Filter targets by action type
-      const filteredTargets =
-        filter === "all"
-          ? targets
-          : targets.filter((target) => target.action === filter);
+      let filteredTargets = [];
+      
+      if (filter === "all") {
+        filteredTargets = targets;
+      } else {
+        filteredTargets = targets.filter((target) => target.action === filter);
+      }
 
       if (filteredTargets.length === 0) {
         if (filter === "all") {
           embed.setDescription("No targets have been set yet.");
         } else {
-          embed.setDescription(`No targets found for action: ${filter}`);
+          // Get the action type display name
+          const actionType = actionTypes.find(a => a.name === filter);
+          const actionDisplay = actionType ? actionType.display_name : filter;
+          
+          embed.setDescription(`No targets found for action: ${actionDisplay}`);
         }
 
         return interaction.editReply({ embeds: [embed] });
@@ -140,12 +146,18 @@ module.exports = {
         const resourceName =
           target.resource_name ||
           target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+        
+        // Get action display name (from join or fallback)
         const actionName =
+          target.action_display_name ||
           target.action.charAt(0).toUpperCase() + target.action.slice(1);
+        
+        // Get unit from target
+        const unit = target.unit || "SCU";
 
         embed.addFields({
           name: `${actionName} ${resourceName}`,
-          value: `${progressBar} ${current}/${target.target_amount} SCU (${percentage}%)`,
+          value: `${progressBar} ${current}/${target.target_amount} ${unit} (${percentage}%)`,
         });
       }
 
@@ -167,4 +179,41 @@ module.exports = {
       }
     }
   },
+  
+  // Autocomplete handler for action types
+  async autocomplete(interaction) {
+    const focusedOption = interaction.options.getFocused(true);
+    
+    try {
+      if (focusedOption.name === "filter") {
+        // Get all action types
+        const actionTypes = await ActionTypeModel.getAll();
+        
+        // Add "all" option
+        const choices = [{ name: "All Action Types", value: "all" }];
+        
+        // Filter action types based on input
+        const filtered = actionTypes.filter(type => 
+          type.name.toLowerCase().includes(focusedOption.value.toLowerCase()) ||
+          type.display_name.toLowerCase().includes(focusedOption.value.toLowerCase())
+        );
+        
+        // Add filtered action types to choices
+        filtered.forEach(type => {
+          choices.push({
+            name: `${type.emoji || ''} ${type.display_name}`,
+            value: type.name
+          });
+        });
+        
+        await interaction.respond(choices);
+      }
+    } catch (error) {
+      console.error('Error during progress command autocomplete:', error);
+      // Return basic choice if there's an error
+      await interaction.respond([
+        { name: "All Action Types", value: "all" }
+      ]);
+    }
+  }
 };

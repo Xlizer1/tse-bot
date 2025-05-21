@@ -20,6 +20,7 @@ const ContributionModel = require("./models/contribution");
 const { DashboardModel, SettingModel } = require("./models/dashboard");
 
 const { updateDashboards } = require("./dashboard-updater");
+const ActionTypeModel = require("./models/actionType");
 
 async function handleAdminButtonInteraction(interaction) {
   if (!interaction.member.permissions.has("Administrator")) {
@@ -104,72 +105,59 @@ const getResourceEmoji = (resourceName) => {
 // Resource Management Button Handler
 async function handleResourcesButton(interaction) {
   try {
-    // Load resources from database
+    // Load resources from database with action types
     const groupedResources = await ResourceModel.getGroupedResources();
 
-    // Function to generate resource description
-    const formatResourceDescription = (resource) => {
-      return `${getResourceEmoji(resource.name)} **${resource.name}** \`${
-        resource.value
-      }\``;
-    };
+    // Get all action types
+    const actionTypes = await ActionTypeModel.getAll();
 
     // Create resources embed
     const resourcesEmbed = new EmbedBuilder()
       .setColor(0x0099ff)
       .setTitle("🗃️ Resource Management")
       .setDescription(
-        "Comprehensive overview of resources for mining, salvage, and hauling operations\n" +
-          "🟤 Use these resources to track and manage your collection targets"
+        "Comprehensive overview of resources for all action types\n" +
+          "Use these resources to track and manage your collection targets"
       )
       .setTimestamp();
 
-    // Add mining resources
-    const miningResources = groupedResources.mining || [];
-    resourcesEmbed.addFields({
-      name: "⛏️ Mining Resources",
-      value:
-        miningResources.length > 0
-          ? miningResources.map(formatResourceDescription).join("\n")
-          : "No mining resources defined",
-      inline: false,
-    });
+    // Function to generate resource description
+    const formatResourceDescription = (resource) => {
+      return `${resource.emoji || "📦"} **${resource.name}** \`${
+        resource.value
+      }\``;
+    };
 
-    // Add salvage resources
-    const salvageResources = groupedResources.salvage || [];
-    resourcesEmbed.addFields({
-      name: "🏭 Salvage Resources",
-      value:
-        salvageResources.length > 0
-          ? salvageResources.map(formatResourceDescription).join("\n")
-          : "No salvage resources defined",
-      inline: false,
-    });
+    // Add fields for each action type
+    for (const actionType of actionTypes) {
+      const resources = groupedResources[actionType.name] || [];
 
-    // Add haul resources
-    const haulResources = groupedResources.haul || [];
-    resourcesEmbed.addFields({
-      name: "🚚 Haul Resources",
-      value:
-        haulResources.length > 0
-          ? haulResources.map(formatResourceDescription).join("\n")
-          : "No haul resources defined",
-      inline: false,
-    });
+      resourcesEmbed.addFields({
+        name: `${actionType.emoji || "📦"} ${
+          actionType.display_name
+        } Resources (${actionType.unit})`,
+        value:
+          resources.length > 0
+            ? resources.map(formatResourceDescription).join("\n")
+            : `No ${actionType.display_name.toLowerCase()} resources defined`,
+        inline: false,
+      });
+    }
 
     // Add statistics
+    const totalResources = Object.values(groupedResources).flat().length;
+
+    const resourceStats = [`**Total Resource Types**: ${totalResources}`];
+
+    // Add count per action type
+    actionTypes.forEach((type) => {
+      const count = (groupedResources[type.name] || []).length;
+      resourceStats.push(`• ${type.display_name}: ${count}`);
+    });
+
     resourcesEmbed.addFields({
       name: "📊 Resource Overview",
-      value: [
-        `**Total Resource Types**: ${
-          miningResources.length +
-          salvageResources.length +
-          haulResources.length
-        }`,
-        `• Mining: ${miningResources.length}`,
-        `• Salvage: ${salvageResources.length}`,
-        `• Haul: ${haulResources.length}`,
-      ].join("\n"),
+      value: resourceStats.join("\n"),
       inline: false,
     });
 
@@ -236,19 +224,48 @@ async function handleTargetsButton(interaction) {
         value: "Use the buttons below to add new targets",
       });
     } else {
-      for (const target of targets) {
-        const current = target.current_amount || 0;
-        const percentage = Math.floor((current / target.target_amount) * 100);
+      // Group targets by action type for better organization
+      const actionGroups = {};
 
-        const resourceName =
-          target.resource_name ||
-          target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
-        const actionName =
-          target.action.charAt(0).toUpperCase() + target.action.slice(1);
+      targets.forEach((target) => {
+        if (!actionGroups[target.action]) {
+          actionGroups[target.action] = [];
+        }
+        actionGroups[target.action].push(target);
+      });
+
+      // Add targets for each action type
+      for (const [action, actionTargets] of Object.entries(actionGroups)) {
+        // Get first target to determine action display name and emoji
+        const sampleTarget = actionTargets[0];
+        const actionDisplay =
+          sampleTarget.action_display_name ||
+          sampleTarget.action.charAt(0).toUpperCase() +
+            sampleTarget.action.slice(1);
+        const actionEmoji =
+          sampleTarget.action_emoji || getActionEmoji(sampleTarget.action);
+
+        // Create field value for this action type
+        const targetsValue = actionTargets
+          .map((target) => {
+            const current = target.current_amount || 0;
+            const percentage = Math.floor(
+              (current / target.target_amount) * 100
+            );
+            const unit = target.unit || "SCU";
+
+            const resourceName =
+              target.resource_name ||
+              target.resource.charAt(0).toUpperCase() +
+                target.resource.slice(1);
+
+            return `**${resourceName}**\nTarget: ${target.target_amount} ${unit}\nCurrent: ${current} ${unit} (${percentage}%)`;
+          })
+          .join("\n\n");
 
         targetsEmbed.addFields({
-          name: `${actionName} ${resourceName}`,
-          value: `Target: ${target.target_amount} SCU\nCurrent: ${current} SCU (${percentage}%)`,
+          name: `${actionEmoji} ${actionDisplay} Targets`,
+          value: targetsValue,
         });
       }
     }
@@ -293,6 +310,18 @@ async function handleTargetsButton(interaction) {
       ],
     });
   }
+}
+
+// Helper function to get emoji for action type
+function getActionEmoji(action) {
+  const emojiMap = {
+    mine: "⛏️",
+    salvage: "🏭",
+    haul: "🚚",
+    earn: "💰",
+  };
+
+  return emojiMap[action] || "📦";
 }
 
 // Export data
@@ -935,6 +964,7 @@ async function handleStatsButton(interaction) {
       mining: resources.mining ? resources.mining.length : 0,
       salvage: resources.salvage ? resources.salvage.length : 0,
       haul: resources.haul ? resources.haul.length : 0,
+      earn: resources.earn ? resources.earn.length : 0,
     };
 
     // Create stats embed
@@ -1084,26 +1114,44 @@ async function handleBackButton(interaction) {
   });
 }
 
-// Add resource button handler
+// Handle the Add Resource button
 async function handleAddResourceButton(interaction) {
-  // Create select menu for action type
-  const row = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("admin_resource_action")
-      .setPlaceholder("Select action type")
-      .addOptions([
-        { label: "Mining Resource", value: "mining" },
-        { label: "Salvage Resource", value: "salvage" },
-        { label: "Hauling Resource", value: "haul" },
-      ])
-  );
+  try {
+    // Get all action types
+    const actionTypes = await ActionTypeModel.getAll();
 
-  // Update the message
-  await interaction.update({
-    content: "Select the action type for the new resource:",
-    embeds: [],
-    components: [row],
-  });
+    // Create select menu for action type
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_resource_action")
+        .setPlaceholder("Select action type")
+    );
+
+    // Add options for all action types
+    actionTypes.forEach((type) => {
+      selectMenu.components[0].addOptions({
+        label: type.display_name,
+        value: type.name,
+        emoji: type.emoji || null,
+        description: `Add a new ${type.display_name.toLowerCase()} resource (${
+          type.unit
+        })`,
+      });
+    });
+
+    // Update the message
+    await interaction.update({
+      content: "Select the action type for the new resource:",
+      embeds: [],
+      components: [selectMenu],
+    });
+  } catch (error) {
+    console.error("Error in handleAddResourceButton:", error);
+    await interaction.reply({
+      content: "An error occurred while listing action types.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 }
 
 // Remove resource button handler
@@ -1157,24 +1205,42 @@ async function handleRemoveResourceButton(interaction) {
 
 // Add target button handler
 async function handleAddTargetButton(interaction) {
-  // Create select menu for action type
-  const row = new ActionRowBuilder().addComponents(
-    new StringSelectMenuBuilder()
-      .setCustomId("admin_target_action")
-      .setPlaceholder("Select action type")
-      .addOptions([
-        { label: "Mining Target", value: "mine" },
-        { label: "Salvage Target", value: "salvage" },
-        { label: "Hauling Target", value: "haul" },
-      ])
-  );
+  try {
+    // Get all action types
+    const actionTypes = await ActionTypeModel.getAll();
 
-  // Update the message
-  await interaction.update({
-    content: "Select the action type for the new target:",
-    embeds: [],
-    components: [row],
-  });
+    // Create select menu for action type
+    const row = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_target_action")
+        .setPlaceholder("Select action type")
+    );
+
+    // Add options for all action types
+    actionTypes.forEach((type) => {
+      row.components[0].addOptions({
+        label: type.display_name,
+        value: type.name,
+        emoji: type.emoji || null,
+        description: `Add a new ${type.display_name.toLowerCase()} target (${
+          type.unit
+        })`,
+      });
+    });
+
+    // Update the message
+    await interaction.update({
+      content: "Select the action type for the new target:",
+      embeds: [],
+      components: [row],
+    });
+  } catch (error) {
+    console.error("Error in handleAddTargetButton:", error);
+    await interaction.reply({
+      content: "An error occurred while listing action types.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 }
 
 // Reset target button handler
@@ -1458,36 +1524,52 @@ async function handleAdminSelectMenuInteraction(interaction) {
 
 // Handle resource action selection for adding new resource
 async function handleResourceActionSelect(interaction, actionType) {
-  // Create modal for new resource info
-  const modal = new ModalBuilder()
-    .setCustomId(`admin_add_resource_modal_${actionType}`)
-    .setTitle(
-      `Add ${actionType.charAt(0).toUpperCase() + actionType.slice(1)} Resource`
-    );
+  try {
+    // Get the action type details
+    const actionTypeInfo = await ActionTypeModel.getByName(actionType);
 
-  // Add input field for display name
-  const nameInput = new TextInputBuilder()
-    .setCustomId("resource_name")
-    .setLabel("Display Name")
-    .setPlaceholder('Enter the display name (e.g., "Copper")')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
+    if (!actionTypeInfo) {
+      return interaction.reply({
+        content: `Action type "${actionType}" not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
 
-  // Add input field for system value
-  const valueInput = new TextInputBuilder()
-    .setCustomId("resource_value")
-    .setLabel("System Value")
-    .setPlaceholder('Enter the system value (lowercase, e.g., "copper")')
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
+    // Create modal for new resource info
+    const modal = new ModalBuilder()
+      .setCustomId(`admin_add_resource_modal_${actionType}`)
+      .setTitle(`Add ${actionTypeInfo.display_name} Resource`);
 
-  // Add rows and fields to modal
-  const firstActionRow = new ActionRowBuilder().addComponents(nameInput);
-  const secondActionRow = new ActionRowBuilder().addComponents(valueInput);
-  modal.addComponents(firstActionRow, secondActionRow);
+    // Add input field for display name
+    const nameInput = new TextInputBuilder()
+      .setCustomId("resource_name")
+      .setLabel("Display Name")
+      .setPlaceholder(`Enter the display name (e.g., "Copper")`)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
 
-  // Show the modal
-  await interaction.showModal(modal);
+    // Add input field for system value
+    const valueInput = new TextInputBuilder()
+      .setCustomId("resource_value")
+      .setLabel("System Value")
+      .setPlaceholder(`Enter the system value (lowercase, e.g., "copper")`)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    // Add rows and fields to modal
+    const firstActionRow = new ActionRowBuilder().addComponents(nameInput);
+    const secondActionRow = new ActionRowBuilder().addComponents(valueInput);
+    modal.addComponents(firstActionRow, secondActionRow);
+
+    // Show the modal
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error(`Error in handleResourceActionSelect:`, error);
+    await interaction.reply({
+      content: "An error occurred while setting up the resource form.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 }
 
 // Handle remove resource action selection
@@ -1559,21 +1641,23 @@ async function handleRemoveResourceActionSelect(interaction, actionType) {
 // Handle target action selection for new target
 async function handleTargetActionSelect(interaction, actionType) {
   try {
-    // Map action type to resource category
-    const resourceCategory =
-      actionType === "mine"
-        ? "mining"
-        : actionType === "salvage"
-        ? "salvage"
-        : "haul";
+    // Get the action type details
+    const actionTypeInfo = await ActionTypeModel.getByName(actionType);
+
+    if (!actionTypeInfo) {
+      return interaction.reply({
+        content: `Action type "${actionType}" not found.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
 
     // Get resources for the action type
-    const resources = await ResourceModel.getByActionType(resourceCategory);
+    const resources = await ResourceModel.getByActionType(actionType);
 
     // Check if there are resources available
     if (resources.length === 0) {
       return interaction.update({
-        content: `There are no resources defined for ${actionType} action. Please add resources first.`,
+        content: `There are no resources defined for ${actionTypeInfo.display_name.toLowerCase()} action. Please add resources first.`,
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -1588,7 +1672,7 @@ async function handleTargetActionSelect(interaction, actionType) {
     // Create select menu options for resources
     const options = resources.map((resource) => ({
       label: resource.name,
-      value: resource.value,
+      value: `${actionType}_${resource.value}`,
       description: `${resource.name} (${resource.value})`,
     }));
 
@@ -1596,7 +1680,9 @@ async function handleTargetActionSelect(interaction, actionType) {
     const row1 = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId("admin_add_target_resource")
-        .setPlaceholder(`Select ${actionType} resource`)
+        .setPlaceholder(
+          `Select ${actionTypeInfo.display_name.toLowerCase()} resource`
+        )
         .addOptions(options)
     );
 
@@ -1610,7 +1696,7 @@ async function handleTargetActionSelect(interaction, actionType) {
 
     // Update the message
     await interaction.update({
-      content: `Select the resource for the new ${actionType} target:`,
+      content: `Select the resource for the new ${actionTypeInfo.display_name.toLowerCase()} target:`,
       components: [row1, row2],
     });
   } catch (error) {
@@ -1834,26 +1920,55 @@ async function handleRemoveResourceSelect(interaction, resourceValue) {
 }
 
 // Handle resource selection for new target
-async function handleAddTargetResourceSelect(interaction, resourceValue) {
-  // Create modal for target amount
-  const modal = new ModalBuilder()
-    .setCustomId(`admin_add_target_modal_${resourceValue}`)
-    .setTitle(`Set Target Amount`);
+// Handle resource selection for new target
+async function handleAddTargetResourceSelect(interaction, combined) {
+  try {
+    // Split the combined value to get action and resource
+    const [actionType, resourceValue] = combined.split("_");
 
-  // Add input field for amount
-  const amountInput = new TextInputBuilder()
-    .setCustomId("target_amount")
-    .setLabel("Target Amount (SCU)")
-    .setPlaceholder("Enter the target amount in SCU")
-    .setStyle(TextInputStyle.Short)
-    .setRequired(true);
+    // Get the action type info for the unit
+    const actionTypeInfo = await ActionTypeModel.getByName(actionType);
+    if (!actionTypeInfo) {
+      throw new Error(`Action type "${actionType}" not found`);
+    }
 
-  // Add rows and fields to modal
-  const firstActionRow = new ActionRowBuilder().addComponents(amountInput);
-  modal.addComponents(firstActionRow);
+    // Get the resource info for the name
+    const resourceInfo = await ResourceModel.getByValueAndType(
+      resourceValue,
+      actionType
+    );
+    if (!resourceInfo) {
+      throw new Error(
+        `Resource "${resourceValue}" not found for action type "${actionType}"`
+      );
+    }
 
-  // Show the modal
-  await interaction.showModal(modal);
+    // Create modal for target amount
+    const modal = new ModalBuilder()
+      .setCustomId(`admin_add_target_modal_${actionType}_${resourceValue}`)
+      .setTitle(`Set Target Amount for ${resourceInfo.name}`);
+
+    // Add input field for amount with the dynamic unit
+    const amountInput = new TextInputBuilder()
+      .setCustomId("target_amount")
+      .setLabel(`Target Amount (${actionTypeInfo.unit})`)
+      .setPlaceholder(`Enter the target amount in ${actionTypeInfo.unit}`)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    // Add rows and fields to modal
+    const firstActionRow = new ActionRowBuilder().addComponents(amountInput);
+    modal.addComponents(firstActionRow);
+
+    // Show the modal
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Error in handleAddTargetResourceSelect:", error);
+    await interaction.reply({
+      content: `Error: ${error.message}`,
+      flags: MessageFlags.Ephemeral,
+    });
+  }
 }
 
 // Handle modal submissions for admin functions
@@ -1878,12 +1993,18 @@ async function handleAdminModalSubmit(interaction) {
       .replace(/\s+/g, "_");
 
     try {
+      // Get action type info
+      const actionTypeInfo = await ActionTypeModel.getByName(actionType);
+      if (!actionTypeInfo) {
+        throw new Error(`Action type "${actionType}" not found`);
+      }
+
       // Add resource to database
       await ResourceModel.add(name, value, actionType);
 
       // Success message
       await interaction.reply({
-        content: `Successfully added ${name} (${value}) to ${actionType} resources.`,
+        content: `Successfully added ${name} (${value}) to ${actionTypeInfo.display_name} resources.`,
         flags: MessageFlags.Ephemeral,
         components: [
           new ActionRowBuilder().addComponents(
@@ -1915,34 +2036,34 @@ async function handleAdminModalSubmit(interaction) {
       });
     }
   } else if (modalId.startsWith("admin_add_target_modal_")) {
-    // Add new target
-    const resourceKey = modalId.replace("admin_add_target_modal_", "");
+    // Extract actionType and resourceValue from the modal ID
+    // The format is admin_add_target_modal_ACTION_RESOURCE
+    // Remove the prefix to get ACTION_RESOURCE
+    const rawValue = modalId.replace("admin_add_target_modal_", "");
+    
+    // Now find the first underscore to split action and resource
+    const firstUnderscoreIndex = rawValue.indexOf('_');
+    if (firstUnderscoreIndex === -1) {
+      return interaction.reply({
+        content: "Invalid modal ID format. Cannot determine action and resource.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+    
+    const actionType = rawValue.substring(0, firstUnderscoreIndex);
+    const resourceValue = rawValue.substring(firstUnderscoreIndex + 1);
 
     // First, acknowledge the interaction to prevent timeout
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-      // Get action type from message content
-      const content = interaction.message.content;
-      const actionMatch = content.match(
-        /Select the resource for the new (\w+) target/
-      );
-
-      if (!actionMatch) {
-        return interaction.editReply({
-          content: "Error: Could not determine action type",
-          components: [
-            new ActionRowBuilder().addComponents(
-              new ButtonBuilder()
-                .setCustomId("admin_back")
-                .setLabel("Back to Admin")
-                .setStyle(ButtonStyle.Secondary)
-            ),
-          ],
-        });
+      // Get action type info for the unit and display name
+      const actionTypeInfo = await ActionTypeModel.getByName(actionType);
+      if (!actionTypeInfo) {
+        throw new Error(`Action type "${actionType}" not found`);
       }
-
-      const action = actionMatch[1];
+      
+      // Parse the amount
       const amount = parseInt(
         interaction.fields.getTextInputValue("target_amount")
       );
@@ -1961,28 +2082,16 @@ async function handleAdminModalSubmit(interaction) {
         });
       }
 
-      // Map action to resource category
-      const resourceCategory =
-        action === "mine"
-          ? "mining"
-          : action === "salvage"
-          ? "salvage"
-          : "haul";
-
-      // Find the resource
-      const resource = await ResourceModel.getByValueAndType(
-        resourceKey,
-        resourceCategory
-      );
-
-      if (!resource) {
-        throw new Error("Resource not found");
+      // Get resource info
+      const resourceInfo = await ResourceModel.getByValueAndType(resourceValue, actionType);
+      if (!resourceInfo) {
+        throw new Error(`Resource "${resourceValue}" not found for action type "${actionType}"`);
       }
 
       // Check if target already exists
       const existingTarget = await TargetModel.getByActionAndResource(
-        action,
-        resourceKey
+        actionType,
+        resourceValue
       );
 
       if (existingTarget) {
@@ -1990,7 +2099,7 @@ async function handleAdminModalSubmit(interaction) {
         await TargetModel.updateAmount(existingTarget.id, amount);
 
         await interaction.editReply({
-          content: `Updated existing target: ${action} ${amount} SCU of ${resource.name}`,
+          content: `Updated existing target: ${actionTypeInfo.display_name} ${amount} ${actionTypeInfo.unit} of ${resourceInfo.name}`,
           components: [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
@@ -2007,14 +2116,14 @@ async function handleAdminModalSubmit(interaction) {
       } else {
         // Create new target
         await TargetModel.create(
-          action,
-          resourceKey,
+          actionType,
+          resourceValue,
           amount,
           interaction.user.id
         );
 
         await interaction.editReply({
-          content: `Successfully set target: ${action} ${amount} SCU of ${resource.name}`,
+          content: `Successfully set target: ${actionTypeInfo.display_name} ${amount} ${actionTypeInfo.unit} of ${resourceInfo.name}`,
           components: [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
