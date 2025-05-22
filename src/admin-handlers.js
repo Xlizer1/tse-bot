@@ -234,7 +234,7 @@ async function handleTargetsButton(interaction) {
         actionGroups[target.action].push(target);
       });
 
-      // Add targets for each action type
+      // Add targets for each action type with character limit handling
       for (const [action, actionTargets] of Object.entries(actionGroups)) {
         // Get first target to determine action display name and emoji
         const sampleTarget = actionTargets[0];
@@ -245,28 +245,64 @@ async function handleTargetsButton(interaction) {
         const actionEmoji =
           sampleTarget.action_emoji || getActionEmoji(sampleTarget.action);
 
-        // Create field value for this action type
-        const targetsValue = actionTargets
-          .map((target) => {
-            const current = target.current_amount || 0;
-            const percentage = Math.floor(
-              (current / target.target_amount) * 100
-            );
-            const unit = target.unit || "SCU";
+        // Create field values for this action type
+        const targetStrings = actionTargets.map((target) => {
+          const current = target.current_amount || 0;
+          const percentage = Math.floor(
+            (current / target.target_amount) * 100
+          );
+          const unit = target.unit || "SCU";
 
-            const resourceName =
-              target.resource_name ||
-              target.resource.charAt(0).toUpperCase() +
-                target.resource.slice(1);
+          const resourceName =
+            target.resource_name ||
+            target.resource.charAt(0).toUpperCase() +
+              target.resource.slice(1);
 
-            return `**${resourceName}**\nTarget: ${target.target_amount} ${unit}\nCurrent: ${current} ${unit} (${percentage}%)`;
-          })
-          .join("\n\n");
-
-        targetsEmbed.addFields({
-          name: `${actionEmoji} ${actionDisplay} Targets`,
-          value: targetsValue,
+          return `**${resourceName}**\nTarget: ${target.target_amount} ${unit}\nCurrent: ${current} ${unit} (${percentage}%)`;
         });
+
+        // Split into multiple fields if content is too long (Discord limit: 1024 chars per field)
+        let currentFieldValue = "";
+        let fieldCounter = 1;
+        const maxFieldLength = 1000; // Leave some buffer under 1024 limit
+
+        for (let i = 0; i < targetStrings.length; i++) {
+          const targetString = targetStrings[i];
+          
+          // Check if adding this target would exceed the limit
+          const testValue = currentFieldValue + (currentFieldValue ? "\n\n" : "") + targetString;
+          
+          if (testValue.length > maxFieldLength && currentFieldValue) {
+            // Add current field and start a new one
+            const fieldName = fieldCounter === 1 
+              ? `${actionEmoji} ${actionDisplay} Targets` 
+              : `${actionEmoji} ${actionDisplay} Targets (${fieldCounter})`;
+            
+            targetsEmbed.addFields({
+              name: fieldName,
+              value: currentFieldValue,
+            });
+
+            // Start new field
+            currentFieldValue = targetString;
+            fieldCounter++;
+          } else {
+            // Add to current field
+            currentFieldValue = testValue;
+          }
+        }
+
+        // Add the final field if there's content
+        if (currentFieldValue) {
+          const fieldName = fieldCounter === 1 
+            ? `${actionEmoji} ${actionDisplay} Targets` 
+            : `${actionEmoji} ${actionDisplay} Targets (${fieldCounter})`;
+          
+          targetsEmbed.addFields({
+            name: fieldName,
+            value: currentFieldValue,
+          });
+        }
       }
     }
 
@@ -1114,6 +1150,11 @@ async function handleBackButton(interaction) {
   });
 }
 
+// Helper function to safely handle emoji values for Discord.js
+function safeEmoji(emoji) {
+  return emoji && emoji !== null ? emoji : undefined;
+}
+
 // Handle the Add Resource button
 async function handleAddResourceButton(interaction) {
   try {
@@ -1129,14 +1170,18 @@ async function handleAddResourceButton(interaction) {
 
     // Add options for all action types
     actionTypes.forEach((type) => {
-      selectMenu.components[0].addOptions({
+      const option = {
         label: type.display_name,
         value: type.name,
-        emoji: type.emoji || null,
-        description: `Add a new ${type.display_name.toLowerCase()} resource (${
-          type.unit
-        })`,
-      });
+        description: `Add a new ${type.display_name.toLowerCase()} resource (${type.unit})`,
+      };
+      
+      // Only add emoji if it exists and is not null
+      if (type.emoji && type.emoji !== null) {
+        option.emoji = type.emoji;
+      }
+      
+      selectMenu.components[0].addOptions(option);
     });
 
     // Update the message
@@ -1203,7 +1248,7 @@ async function handleRemoveResourceButton(interaction) {
   }
 }
 
-// Add target button handler
+// Handle the Add Target button
 async function handleAddTargetButton(interaction) {
   try {
     // Get all action types
@@ -1218,14 +1263,18 @@ async function handleAddTargetButton(interaction) {
 
     // Add options for all action types
     actionTypes.forEach((type) => {
-      row.components[0].addOptions({
+      const option = {
         label: type.display_name,
         value: type.name,
-        emoji: type.emoji || null,
-        description: `Add a new ${type.display_name.toLowerCase()} target (${
-          type.unit
-        })`,
-      });
+        description: `Add a new ${type.display_name.toLowerCase()} target (${type.unit})`,
+      };
+      
+      // Only add emoji if it exists and is not null
+      if (type.emoji && type.emoji !== null) {
+        option.emoji = type.emoji;
+      }
+      
+      row.components[0].addOptions(option);
     });
 
     // Update the message

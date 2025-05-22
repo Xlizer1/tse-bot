@@ -24,7 +24,6 @@ const client = new Client({
   ],
 });
 
-client.db = pool;
 client.commands = new Collection();
 const commandFiles = fs
   .readdirSync(path.join(__dirname, "commands"))
@@ -35,6 +34,13 @@ for (const file of commandFiles) {
   client.commands.set(command.data.name, command);
 }
 
+// Helper to get guild ID from interaction context
+const interactionContext = {
+  getGuildId: (interaction) => {
+    return interaction.guild?.id || null;
+  }
+};
+
 // Initialize database before starting the bot
 async function init() {
   console.log("Initializing database...");
@@ -42,8 +48,8 @@ async function init() {
     await setupDatabase();
     console.log("Database initialization complete");
 
-    // Add direct database access
-    client.db = pool.promise();
+    // Add direct database access - pool is already promise-based
+    client.db = pool;
     
     // Start the bot after database is initialized
     startBot();
