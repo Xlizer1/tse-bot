@@ -4,40 +4,30 @@ class TargetModel {
   // Get all targets with progress for a specific guild
   static async getAllWithProgress(guildId = null) {
     try {
+      let query = `
+        SELECT t.*, p.current_amount, r.name as resource_name, r.emoji as resource_emoji, 
+               at.unit, at.display_name as action_display_name, at.emoji as action_emoji
+        FROM targets t
+        LEFT JOIN progress p ON t.id = p.target_id
+        LEFT JOIN action_types at ON at.name = t.action
+        LEFT JOIN resources r ON t.resource = r.value AND t.guild_id = r.guild_id AND
+          CASE 
+            WHEN t.action = at.name THEN r.action_type_id = (SELECT id FROM action_types WHERE name = t.action) 
+            ELSE 1=0
+          END
+      `;
+      
+      let params = [];
+      
       if (guildId) {
-        // If guild ID is provided, filter by it
-        const [rows] = await pool.execute(`
-          SELECT t.*, p.current_amount, r.name as resource_name, r.emoji as resource_emoji, 
-                 at.unit, at.display_name as action_display_name, at.emoji as action_emoji
-          FROM targets t
-          LEFT JOIN progress p ON t.id = p.target_id
-          LEFT JOIN action_types at ON at.name = t.action
-          LEFT JOIN resources r ON t.resource = r.value AND t.guild_id = r.guild_id AND
-            CASE 
-              WHEN t.action = at.name THEN r.action_type_id = (SELECT id FROM action_types WHERE name = t.action) 
-              ELSE 1=0
-            END
-          WHERE t.guild_id = ?
-          ORDER BY t.action, t.resource
-        `, [guildId]);
-        return rows;
-      } else {
-        // Otherwise get all targets (for backward compatibility)
-        const [rows] = await pool.execute(`
-          SELECT t.*, p.current_amount, r.name as resource_name, r.emoji as resource_emoji, 
-                 at.unit, at.display_name as action_display_name, at.emoji as action_emoji
-          FROM targets t
-          LEFT JOIN progress p ON t.id = p.target_id
-          LEFT JOIN action_types at ON at.name = t.action
-          LEFT JOIN resources r ON t.resource = r.value AND 
-            CASE 
-              WHEN t.action = at.name THEN r.action_type_id = (SELECT id FROM action_types WHERE name = t.action) 
-              ELSE 1=0
-            END
-          ORDER BY t.action, t.resource
-        `);
-        return rows;
+        query += " WHERE t.guild_id = ?";
+        params.push(guildId);
       }
+      
+      query += " ORDER BY t.action, t.resource";
+      
+      const [rows] = await pool.execute(query, params);
+      return rows;
     } catch (error) {
       console.error("Error getting targets with progress:", error);
       throw error;
@@ -47,27 +37,23 @@ class TargetModel {
   // Get a specific target by action and resource for a specific guild
   static async getByActionAndResource(action, resource, guildId = null) {
     try {
+      let query = `
+        SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
+        FROM targets t 
+        LEFT JOIN progress p ON t.id = p.target_id
+        LEFT JOIN action_types at ON at.name = t.action
+        WHERE t.action = ? AND t.resource = ?
+      `;
+      
+      let params = [action, resource];
+      
       if (guildId) {
-        // If guild ID is provided, filter by it
-        const [rows] = await pool.execute(`
-          SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
-          FROM targets t 
-          LEFT JOIN progress p ON t.id = p.target_id
-          LEFT JOIN action_types at ON at.name = t.action
-          WHERE t.action = ? AND t.resource = ? AND t.guild_id = ?
-        `, [action, resource, guildId]);
-        return rows[0] || null;
-      } else {
-        // Otherwise get by action and resource (for backward compatibility)
-        const [rows] = await pool.execute(`
-          SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
-          FROM targets t 
-          LEFT JOIN progress p ON t.id = p.target_id
-          LEFT JOIN action_types at ON at.name = t.action
-          WHERE t.action = ? AND t.resource = ?
-        `, [action, resource]);
-        return rows[0] || null;
+        query += " AND t.guild_id = ?";
+        params.push(guildId);
       }
+      
+      const [rows] = await pool.execute(query, params);
+      return rows[0] || null;
     } catch (error) {
       console.error(`Error getting target for ${action} ${resource}:`, error);
       throw error;
@@ -109,19 +95,15 @@ class TargetModel {
         throw new Error(`Action type "${action}" does not exist`);
       }
 
-      // Create the target with guild_id if provided
-      let result;
-      if (guildId) {
-        [result] = await connection.execute(
-          "INSERT INTO targets (guild_id, action, resource, target_amount, created_by) VALUES (?, ?, ?, ?, ?)",
-          [guildId, action, resource, targetAmount, createdBy]
-        );
-      } else {
-        [result] = await connection.execute(
-          "INSERT INTO targets (action, resource, target_amount, created_by) VALUES (?, ?, ?, ?)",
-          [action, resource, targetAmount, createdBy]
-        );
+      // Create the target with guild_id (required for multi-guild support)
+      if (!guildId) {
+        throw new Error("Guild ID is required for creating targets");
       }
+      
+      const [result] = await connection.execute(
+        "INSERT INTO targets (guild_id, action, resource, target_amount, created_by) VALUES (?, ?, ?, ?, ?)",
+        [guildId, action, resource, targetAmount, createdBy]
+      );
 
       const targetId = result.insertId;
 

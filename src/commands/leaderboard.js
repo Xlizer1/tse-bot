@@ -65,8 +65,18 @@ module.exports = {
         .setRequired(false)
     ),
 
-  async execute(interaction) {
+  async execute(interaction, guildId = null) {
     try {
+      // Use provided guildId or fallback to interaction guild
+      const currentGuildId = guildId || interaction.guild?.id;
+      
+      if (!currentGuildId) {
+        return interaction.reply({
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      
       await interaction.deferReply(); // Use defer since this might take time
 
       // Get filter options
@@ -101,7 +111,7 @@ module.exports = {
 
       // Detailed description with filter information
       const descriptionParts = [
-        `📊 Showing top ${limit} contributors`,
+        `📊 Showing top ${limit} contributors for this server`,
         actionFilter !== "all" ? `for ${actionFilter}` : "",
         resourceFilter ? `of ${resourceFilter}` : "",
         fromDate ? `\n📅 From: ${fromDate.toISOString().split("T")[0]}` : "",
@@ -109,8 +119,8 @@ module.exports = {
       ];
       embed.setDescription(descriptionParts.join(" "));
 
-      // Get all targets
-      const targets = await TargetModel.getAllWithProgress();
+      // Get all targets for this guild
+      const targets = await TargetModel.getAllWithProgress(currentGuildId);
 
       // Filter targets by action type and resource if specified
       let filteredTargets = targets;
@@ -129,7 +139,7 @@ module.exports = {
 
       if (filteredTargets.length === 0) {
         embed.setDescription(
-          "No matching targets found with the specified filters."
+          "No matching targets found with the specified filters for this server."
         );
         return interaction.editReply({ embeds: [embed] });
       }
@@ -201,7 +211,7 @@ module.exports = {
 
       if (!contributionsFound) {
         embed.setDescription(
-          "No contributions found with the specified filters."
+          "No contributions found with the specified filters for this server."
         );
         return interaction.editReply({ embeds: [embed] });
       }

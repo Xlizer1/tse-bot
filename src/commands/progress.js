@@ -31,8 +31,18 @@ module.exports = {
         .setRequired(false)
     ),
 
-  async execute(interaction) {
+  async execute(interaction, guildId = null) {
     try {
+      // Use provided guildId or fallback to interaction guild
+      const currentGuildId = guildId || interaction.guild?.id;
+      
+      if (!currentGuildId) {
+        return interaction.reply({
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      
       await interaction.deferReply(); // Use defer since this might take time
 
       // Get filter options
@@ -58,15 +68,15 @@ module.exports = {
       // Get all action types for filtering
       const actionTypes = await ActionTypeModel.getAll();
       
-      // Get all targets with progress
-      const targets = await TargetModel.getAllWithProgress();
+      // Get all targets with progress for this guild
+      const targets = await TargetModel.getAllWithProgress(currentGuildId);
 
       // Create embed for the response
       const embed = new EmbedBuilder()
         .setColor(0x0099ff)
         .setTitle("Resource Collection Progress")
         .setDescription(
-          "Current progress towards collection targets" +
+          "Current progress towards collection targets for this server" +
             (fromDate
               ? `\nFrom: ${fromDate.toISOString().split("T")[0]}`
               : "") +
@@ -85,13 +95,13 @@ module.exports = {
 
       if (filteredTargets.length === 0) {
         if (filter === "all") {
-          embed.setDescription("No targets have been set yet.");
+          embed.setDescription("No targets have been set yet for this server.");
         } else {
           // Get the action type display name
           const actionType = actionTypes.find(a => a.name === filter);
           const actionDisplay = actionType ? actionType.display_name : filter;
           
-          embed.setDescription(`No targets found for action: ${actionDisplay}`);
+          embed.setDescription(`No targets found for action: ${actionDisplay} in this server`);
         }
 
         return interaction.editReply({ embeds: [embed] });
@@ -181,7 +191,7 @@ module.exports = {
   },
   
   // Autocomplete handler for action types
-  async autocomplete(interaction) {
+  async autocomplete(interaction, guildId = null) {
     const focusedOption = interaction.options.getFocused(true);
     
     try {

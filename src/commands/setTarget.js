@@ -35,13 +35,22 @@ module.exports = {
         .setMinValue(1)
     ),
 
-  async execute(interaction) {
+  async execute(interaction, guildId = null) {
     try {
+      // Use provided guildId or fallback to interaction guild
+      const currentGuildId = guildId || interaction.guild?.id;
+      
+      if (!currentGuildId) {
+        return interaction.reply({
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      
       // Permissions check for admins
       if (!interaction.member.permissions.has("Administrator")) {
         return interaction.reply({
-          content:
-            "You do not have permission to use this command. Only administrators can set targets.",
+          content: "You do not have permission to use this command. Only administrators can set targets.",
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -50,44 +59,28 @@ module.exports = {
       const resource = interaction.options.getString("resource").toLowerCase();
       const amount = interaction.options.getInteger("amount");
 
-      // Check if resource exists
-      const resourceCategory =
-        action === "mine"
-          ? "mining"
-          : action === "salvage"
-          ? "salvage"
-          : "haul";
-
-      const resourceInfo = await ResourceModel.getByValueAndType(
-        resource,
-        resourceCategory
-      );
+      // Check if resource exists in this guild
+      const resourceCategory = action === "mine" ? "mining" : action === "salvage" ? "salvage" : "haul";
+      const resourceInfo = await ResourceModel.getByValueAndType(resource, resourceCategory, currentGuildId);
 
       if (!resourceInfo) {
         return interaction.reply({
-          content: `Resource "${resource}" not found for the ${action} action. Please check the resource name or add it first.`,
+          content: `Resource "${resource}" not found for the ${action} action in this server. Please check the resource name or add it first.`,
           flags: MessageFlags.Ephemeral,
         });
       }
 
-      // Check if target already exists
-      const existingTarget = await TargetModel.getByActionAndResource(
-        action,
-        resource
-      );
+      // Check if target already exists in this guild
+      const existingTarget = await TargetModel.getByActionAndResource(action, resource, currentGuildId);
 
       if (existingTarget) {
         // Update existing target
         await TargetModel.updateAmount(existingTarget.id, amount);
-        await interaction.reply(
-          `Target updated: ${action} ${amount} SCU of ${resourceInfo.name}`
-        );
+        await interaction.reply(`Target updated: ${action} ${amount} SCU of ${resourceInfo.name}`);
       } else {
         // Create new target
-        await TargetModel.create(action, resource, amount, interaction.user.id);
-        await interaction.reply(
-          `Target set: ${action} ${amount} SCU of ${resourceInfo.name}`
-        );
+        await TargetModel.create(action, resource, amount, interaction.user.id, currentGuildId);
+        await interaction.reply(`Target set: ${action} ${amount} SCU of ${resourceInfo.name}`);
       }
 
       // Update dashboards

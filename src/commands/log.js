@@ -37,19 +37,29 @@ module.exports = {
         .setRequired(true)
     ),
 
-  async execute(interaction) {
+  async execute(interaction, guildId = null) {
     try {
+      // Use provided guildId or fallback to interaction guild
+      const currentGuildId = guildId || interaction.guild?.id;
+      
+      if (!currentGuildId) {
+        return interaction.reply({
+          content: "This command can only be used in a server.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+      
       const action = interaction.options.getString("action");
       const resource = interaction.options.getString("resource").toLowerCase();
       const amount = interaction.options.getInteger("amount");
       const location = interaction.options.getString("location");
 
-      // Get the target for this action and resource
-      const target = await TargetModel.getByActionAndResource(action, resource);
+      // Get the target for this action and resource in this guild
+      const target = await TargetModel.getByActionAndResource(action, resource, currentGuildId);
 
       if (!target) {
         return interaction.reply({
-          content: `No target found for ${action} ${resource}. Please check the resource name or ask an admin to set this target.`,
+          content: `No target found for ${action} ${resource} in this server. Please check the resource name or ask an admin to set this target.`,
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -78,7 +88,7 @@ module.exports = {
       const actionDisplay = actionType ? actionType.display_name : action.charAt(0).toUpperCase() + action.slice(1);
 
       // Get resource name for display
-      const resourceInfo = await ResourceModel.getByValueAndType(resource, action);
+      const resourceInfo = await ResourceModel.getByValueAndType(resource, action, currentGuildId);
       const resourceName = resourceInfo
         ? resourceInfo.name
         : resource.charAt(0).toUpperCase() + resource.slice(1);
@@ -101,10 +111,13 @@ module.exports = {
   },
 
   // Autocomplete handler for action and resource options
-  async autocomplete(interaction) {
+  async autocomplete(interaction, guildId = null) {
     const focusedOption = interaction.options.getFocused(true);
     
     try {
+      // Use provided guildId or fallback to interaction guild
+      const currentGuildId = guildId || interaction.guild?.id;
+      
       if (focusedOption.name === "action") {
         // Get all action types
         const actionTypes = await ActionTypeModel.getAll();
@@ -126,12 +139,12 @@ module.exports = {
         
         let resources = [];
         
-        if (selectedAction) {
-          // Get resources for this action type
-          resources = await ResourceModel.getByActionType(selectedAction);
-        } else {
-          // Get all resources
-          resources = await ResourceModel.getAll();
+        if (selectedAction && currentGuildId) {
+          // Get resources for this action type in this guild
+          resources = await ResourceModel.getByActionType(selectedAction, currentGuildId);
+        } else if (currentGuildId) {
+          // Get all resources for this guild
+          resources = await ResourceModel.getAll(currentGuildId);
         }
         
         const filtered = resources.filter(resource => 

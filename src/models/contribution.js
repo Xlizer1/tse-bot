@@ -94,20 +94,33 @@ class ContributionModel {
     }
   }
 
-  // Get top contributors overall
-  static async getTopContributors(limit = 10) {
+  // Get top contributors overall or for a specific guild
+  static async getTopContributors(limit = 10, guildId = null) {
     try {
-      const [rows] = await pool.query(
-        `
-        SELECT user_id, username, SUM(amount) as total_amount
-        FROM contributions
-        GROUP BY user_id, username
+      let query = `
+        SELECT c.user_id, c.username, SUM(c.amount) as total_amount
+        FROM contributions c
+      `;
+      
+      let params = [];
+      
+      if (guildId) {
+        query += `
+          JOIN targets t ON c.target_id = t.id
+          WHERE t.guild_id = ?
+        `;
+        params.push(guildId);
+      }
+      
+      query += `
+        GROUP BY c.user_id, c.username
         ORDER BY total_amount DESC
         LIMIT ?
-      `,
-        [limit]
-      );
-
+      `;
+      
+      params.push(limit);
+      
+      const [rows] = await pool.query(query, params);
       return rows;
     } catch (error) {
       console.error("Error getting top contributors:", error);
@@ -115,22 +128,32 @@ class ContributionModel {
     }
   }
 
-  // Get top contributors by action type
-  static async getTopContributorsByAction(action, limit = 10) {
+  // Get top contributors by action type for a specific guild
+  static async getTopContributorsByAction(action, limit = 10, guildId = null) {
     try {
-      const [rows] = await pool.query(
-        `
+      let query = `
         SELECT c.user_id, c.username, SUM(c.amount) as total_amount
         FROM contributions c
         JOIN targets t ON c.target_id = t.id
         WHERE t.action = ?
+      `;
+      
+      let params = [action];
+      
+      if (guildId) {
+        query += ` AND t.guild_id = ?`;
+        params.push(guildId);
+      }
+      
+      query += `
         GROUP BY c.user_id, c.username
         ORDER BY total_amount DESC
         LIMIT ?
-      `,
-        [action, limit]
-      );
-
+      `;
+      
+      params.push(limit);
+      
+      const [rows] = await pool.query(query, params);
       return rows;
     } catch (error) {
       console.error(`Error getting top contributors for ${action}:`, error);
@@ -138,21 +161,27 @@ class ContributionModel {
     }
   }
 
-  // Get contributions by location
-  static async getByLocation(location, limit = 100) {
+  // Get contributions by location for a specific guild
+  static async getByLocation(location, limit = 100, guildId = null) {
     try {
-      const [rows] = await pool.query(
-        `
+      let query = `
         SELECT c.*, t.action, t.resource 
         FROM contributions c 
         JOIN targets t ON c.target_id = t.id 
-        WHERE c.location LIKE ? 
-        ORDER BY c.timestamp DESC 
-        LIMIT ?
-      `,
-        [`%${location}%`, limit]
-      );
+        WHERE c.location LIKE ?
+      `;
+      
+      let params = [`%${location}%`];
+      
+      if (guildId) {
+        query += ` AND t.guild_id = ?`;
+        params.push(guildId);
+      }
+      
+      query += ` ORDER BY c.timestamp DESC LIMIT ?`;
+      params.push(limit);
 
+      const [rows] = await pool.query(query, params);
       return rows;
     } catch (error) {
       console.error(
@@ -163,8 +192,8 @@ class ContributionModel {
     }
   }
 
-  // Get contributions with date filtering
-  static async getWithDateFilter(fromDate, toDate, limit = 100) {
+  // Get contributions with date filtering for a specific guild
+  static async getWithDateFilter(fromDate, toDate, limit = 100, guildId = null) {
     try {
       let query = `
         SELECT c.*, t.action, t.resource 
@@ -184,6 +213,11 @@ class ContributionModel {
         query += " AND c.timestamp <= ?";
         params.push(toDate);
       }
+      
+      if (guildId) {
+        query += " AND t.guild_id = ?";
+        params.push(guildId);
+      }
 
       query += " ORDER BY c.timestamp DESC LIMIT ?";
       params.push(limit);
@@ -196,20 +230,76 @@ class ContributionModel {
     }
   }
 
-  // Get all locations with resource types
-  static async getAllLocations() {
+  // Get all locations with resource types for a specific guild
+  static async getAllLocations(guildId = null) {
     try {
-      const [rows] = await pool.query(`
+      let query = `
         SELECT DISTINCT c.location, t.action, t.resource, SUM(c.amount) as total_amount
         FROM contributions c
         JOIN targets t ON c.target_id = t.id
+      `;
+      
+      let params = [];
+      
+      if (guildId) {
+        query += ` WHERE t.guild_id = ?`;
+        params.push(guildId);
+      }
+      
+      query += `
         GROUP BY c.location, t.action, t.resource
         ORDER BY c.location
-      `);
+      `;
 
+      const [rows] = await pool.query(query, params);
       return rows;
     } catch (error) {
       console.error("Error getting all locations:", error);
+      throw error;
+    }
+  }
+
+  // Get contributions for targets in a specific guild
+  static async getForGuild(guildId, limit = 100) {
+    try {
+      const [rows] = await pool.query(`
+        SELECT c.*, t.action, t.resource, t.guild_id
+        FROM contributions c
+        JOIN targets t ON c.target_id = t.id
+        WHERE t.guild_id = ?
+        ORDER BY c.timestamp DESC
+        LIMIT ?
+      `, [guildId, limit]);
+      
+      return rows;
+    } catch (error) {
+      console.error(`Error getting contributions for guild ${guildId}:`, error);
+      throw error;
+    }
+  }
+
+  // Get contribution statistics for a guild
+  static async getGuildStats(guildId) {
+    try {
+      const [stats] = await pool.query(`
+        SELECT 
+          COUNT(*) as total_contributions,
+          SUM(c.amount) as total_amount,
+          COUNT(DISTINCT c.user_id) as unique_contributors,
+          AVG(c.amount) as average_contribution
+        FROM contributions c
+        JOIN targets t ON c.target_id = t.id
+        WHERE t.guild_id = ?
+      `, [guildId]);
+      
+      return stats[0] || {
+        total_contributions: 0,
+        total_amount: 0,
+        unique_contributors: 0,
+        average_contribution: 0
+      };
+    } catch (error) {
+      console.error(`Error getting guild stats for ${guildId}:`, error);
       throw error;
     }
   }

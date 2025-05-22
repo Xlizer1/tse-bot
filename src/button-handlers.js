@@ -18,19 +18,31 @@ const {
 
 // Handler for button interactions
 async function handleButtonInteraction(interaction, guildId) {
+  // Use provided guildId or fallback to interaction guild
+  const currentGuildId = guildId || interaction.guild?.id;
+
+  console.log(currentGuildId)
+  
+  if (!currentGuildId) {
+    return interaction.reply({
+      content: "This command can only be used in a server.",
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+  
   // Get the button ID that was clicked
   const buttonId = interaction.customId;
   
   // Extract source guild ID from shared dashboard buttons
-  let sourceGuildId = guildId;
+  let sourceGuildId = currentGuildId;
   if (buttonId.includes("_")) {
     const parts = buttonId.split("_");
     if (parts.length > 2) {
       // Format: action_name_guildId
       sourceGuildId = parts[parts.length - 1];
       // Reform the original button ID without the guild suffix
-      buttonParts = parts.slice(0, parts.length - 1);
-      buttonBase = buttonParts.join("_");
+      const buttonParts = parts.slice(0, parts.length - 1);
+      const buttonBase = buttonParts.join("_");
     }
   }
 
@@ -38,22 +50,22 @@ async function handleButtonInteraction(interaction, guildId) {
   if (buttonId.startsWith("admin_")) {
     // Import admin handlers dynamically to avoid circular dependency
     const adminHandlers = require("./admin-handlers");
-    await adminHandlers.handleAdminButtonInteraction(interaction, guildId);
+    await adminHandlers.handleAdminButtonInteraction(interaction, currentGuildId);
     return;
   }
 
   switch (buttonId) {
     case "add_resources":
-      await handleAddResourcesButton(interaction, guildId);
+      await handleAddResourcesButton(interaction, currentGuildId);
       break;
     case "view_progress":
-      await handleViewProgressButton(interaction, guildId);
+      await handleViewProgressButton(interaction, currentGuildId);
       break;
     case "view_leaderboard":
-      await handleViewLeaderboardButton(interaction, guildId);
+      await handleViewLeaderboardButton(interaction, currentGuildId);
       break;
     case "view_locations":
-      await handleViewLocationsButton(interaction, guildId);
+      await handleViewLocationsButton(interaction, currentGuildId);
       break;
     case "refresh_dashboard":
       await handleRefreshDashboard(interaction);
@@ -73,13 +85,13 @@ async function handleButtonInteraction(interaction, guildId) {
 // Handle the Log Resource button
 async function handleAddResourcesButton(interaction, guildId) {
   try {
-    // Get all targets with progress
+    // Get all targets with progress for this guild
     const targets = await TargetModel.getAllWithProgress(guildId);
 
     if (targets.length === 0) {
       return interaction.reply({
         content:
-          "No targets have been set yet. Ask an admin to set targets first.",
+          "No targets have been set yet for this server. Ask an admin to set targets first.",
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -248,17 +260,26 @@ async function handleSelectMenuInteraction(interaction) {
     return;
   }
 
-  if (interaction.customId === "action_select") {
+  // Extract guild ID from custom ID for guild-specific menus
+  let guildId = interaction.guild?.id;
+  if (interaction.customId.includes("_")) {
+    const parts = interaction.customId.split("_");
+    if (parts.length > 2) {
+      guildId = parts[parts.length - 1];
+    }
+  }
+
+  if (interaction.customId.startsWith("action_select")) {
     try {
       const actionType = interaction.values[0];
       
-      // Get all targets for this action type
-      const targets = await TargetModel.getAllWithProgress();
+      // Get all targets for this action type in this guild
+      const targets = await TargetModel.getAllWithProgress(guildId);
       const filteredTargets = targets.filter(target => target.action === actionType);
       
       if (filteredTargets.length === 0) {
         return interaction.reply({
-          content: "No targets found for this action type.",
+          content: "No targets found for this action type in this server.",
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -269,7 +290,7 @@ async function handleSelectMenuInteraction(interaction) {
       // Create a select menu for resource selection based on action type
       const selectMenu = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
-          .setCustomId("resource_select")
+          .setCustomId(`resource_select_${guildId}`)
           .setPlaceholder(`Select a ${actionTypeInfo.display_name.toLowerCase()} resource`)
       );
       
@@ -297,16 +318,16 @@ async function handleSelectMenuInteraction(interaction) {
         flags: MessageFlags.Ephemeral,
       });
     }
-  } else if (interaction.customId === "resource_select") {
+  } else if (interaction.customId.startsWith("resource_select")) {
     try {
       const [action, resource] = interaction.values[0].split('_');
       
-      // Get target details
-      const target = await TargetModel.getByActionAndResource(action, resource);
+      // Get target details for this guild
+      const target = await TargetModel.getByActionAndResource(action, resource, guildId);
       
       if (!target) {
         return interaction.reply({
-          content: "The selected target could not be found. Please try again.",
+          content: "The selected target could not be found in this server. Please try again.",
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -318,7 +339,7 @@ async function handleSelectMenuInteraction(interaction) {
                           (actionType ? actionType.display_name : action.charAt(0).toUpperCase() + action.slice(1));
       
       // Get resource name
-      const resourceInfo = await ResourceModel.getByValueAndType(resource, action);
+      const resourceInfo = await ResourceModel.getByValueAndType(resource, action, guildId);
       const resourceName = target.resource_name || 
                            (resourceInfo ? resourceInfo.name : resource.charAt(0).toUpperCase() + resource.slice(1));
       
@@ -415,7 +436,7 @@ async function handleModalSubmitInteraction(interaction) {
                           (actionType ? actionType.display_name : target.action.charAt(0).toUpperCase() + target.action.slice(1));
       
       // Get resource name
-      const resourceInfo = await ResourceModel.getByValueAndType(target.resource, target.action);
+      const resourceInfo = await ResourceModel.getByValueAndType(target.resource, target.action, target.guild_id);
       const resourceName = target.resource_name || 
                            (resourceInfo ? resourceInfo.name : target.resource.charAt(0).toUpperCase() + target.resource.slice(1));
 

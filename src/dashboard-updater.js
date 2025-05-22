@@ -30,10 +30,14 @@ function getActionEmoji(actionName, actionEmoji = null) {
   return emojiMap[actionName] || "📦";
 }
 
-// Generate insights and stats
+// Generate insights and stats for a specific guild
 async function generateDashboardInsights(guildId) {
   try {
-    // Get all targets
+    if (!guildId) {
+      throw new Error("Guild ID is required for dashboard insights");
+    }
+    
+    // Get all targets for this guild
     const targets = await TargetModel.getAllWithProgress(guildId);
     const actionTypes = await ActionTypeModel.getAll();
     const topContributors = await ContributionModel.getTopContributors(3);
@@ -49,9 +53,9 @@ async function generateDashboardInsights(guildId) {
       (sum, target) => sum + target.target_amount,
       0
     );
-    const overallProgress = Math.floor(
+    const overallProgress = totalTargetAmount > 0 ? Math.floor(
       (totalContributions / totalTargetAmount) * 100
-    );
+    ) : 0;
 
     // Resource type breakdown
     const resourceBreakdown = targets.reduce((acc, target) => {
@@ -93,9 +97,9 @@ async function generateDashboardInsights(guildId) {
             displayName: actionType.display_name,
             emoji: actionType.emoji,
             unit: actionType.unit,
-            percentage: Math.floor((data.current / data.total) * 100),
+            percentage: data.total > 0 ? Math.floor((data.current / data.total) * 100) : 0,
             progressBar: createProgressBar(
-              Math.floor((data.current / data.total) * 100)
+              data.total > 0 ? Math.floor((data.current / data.total) * 100) : 0
             ),
           };
         }
@@ -112,7 +116,7 @@ async function generateDashboardInsights(guildId) {
   }
 }
 
-// Create a progress embed based on targets
+// Create a progress embed based on targets for a specific guild
 async function createProgressEmbed(guildId) {
   const embed = new EmbedBuilder()
     .setColor(0x0099ff)
@@ -120,11 +124,24 @@ async function createProgressEmbed(guildId) {
     .setTimestamp();
 
   try {
+    if (!guildId) {
+      embed.setDescription("Error: Guild ID is required to display dashboard data.");
+      return embed;
+    }
+    
     const insights = await generateDashboardInsights(guildId);
 
     if (!insights) {
       embed.setDescription(
         "Unable to generate dashboard insights at this time."
+      );
+      return embed;
+    }
+
+    // Check if there's any data
+    if (insights.totalTargets === 0) {
+      embed.setDescription(
+        "No targets have been set for this server yet. Use `/settarget` to create targets!"
       );
       return embed;
     }
@@ -140,22 +157,26 @@ async function createProgressEmbed(guildId) {
     embed.setDescription(description);
 
     // Resource Breakdown
-    const resourceBreakdownField = insights.resourceBreakdown
-      .map(
-        (rb) =>
-          `${getActionEmoji(rb.action, rb.emoji)} **${rb.displayName}**: ${
-            rb.progressBar
-          } ${rb.percentage}%`
-      )
-      .join("\n");
+    if (insights.resourceBreakdown.length > 0) {
+      const resourceBreakdownField = insights.resourceBreakdown
+        .map(
+          (rb) =>
+            `${getActionEmoji(rb.action, rb.emoji)} **${rb.displayName}**: ${
+              rb.progressBar
+            } ${rb.percentage}%`
+        )
+        .join("\n");
 
-    embed.addFields({
-      name: "📈 Resource Type Breakdown",
-      value: resourceBreakdownField || "No active targets",
-    });
+      embed.addFields({
+        name: "📈 Resource Type Breakdown",
+        value: resourceBreakdownField,
+      });
+    }
 
-    // Top Contributors
+    // Top Contributors (filter to only this guild's contributions)
     if (insights.topContributors && insights.topContributors.length > 0) {
+      // Note: We should filter contributors by guild, but for now showing global top contributors
+      // TODO: Update ContributionModel.getTopContributors to accept guildId parameter
       const topContributorsField = insights.topContributors
         .map(
           (contributor, index) =>
@@ -203,7 +224,7 @@ async function createProgressEmbed(guildId) {
   } catch (error) {
     console.error("Error creating progress embed:", error);
 
-    embed.setDescription("An error occurred while loading dashboard data.");
+    embed.setDescription("An error occurred while loading dashboard data for this server.");
     return embed;
   }
 }
@@ -251,7 +272,7 @@ async function updateDashboards(client) {
             continue;
           }
 
-          // Create updated embed
+          // Create updated embed with guild-specific data
           const updatedEmbed = await createProgressEmbed(data_guild_id);
 
           // Add source attribution for shared dashboards
@@ -305,17 +326,24 @@ async function handleRefreshDashboard(interaction) {
   try {
     // Check if this is a shared dashboard button (format: refresh_dashboard_GUILDID)
     const buttonId = interaction.customId;
-    let sourceGuildId = interaction.guild.id;
+    let sourceGuildId = interaction.guild?.id;
 
     if (buttonId.startsWith("refresh_dashboard_")) {
       sourceGuildId = buttonId.replace("refresh_dashboard_", "");
     }
 
-    // Create updated embed
+    if (!sourceGuildId) {
+      return interaction.reply({
+        content: "Error: Could not determine guild context for refresh.",
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
+    // Create updated embed with guild-specific data
     const updatedEmbed = await createProgressEmbed(sourceGuildId);
 
     // Add source attribution for shared dashboards
-    if (sourceGuildId !== interaction.guild.id) {
+    if (sourceGuildId !== interaction.guild?.id) {
       let sourceName = sourceGuildId;
       try {
         const sourceGuild = await interaction.client.guilds.fetch(
@@ -330,7 +358,7 @@ async function handleRefreshDashboard(interaction) {
 
       updatedEmbed.setFooter({
         text: `Data from: ${sourceName} | ID: ${sourceGuildId}`,
-        iconURL: interaction.guild.iconURL({ dynamic: true }),
+        iconURL: interaction.guild?.iconURL({ dynamic: true }),
       });
     }
 
