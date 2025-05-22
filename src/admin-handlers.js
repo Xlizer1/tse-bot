@@ -251,12 +251,15 @@ async function handleTargetsButton(interaction) {
         const targetStrings = actionTargets.map((target) => {
           const current = target.current_amount || 0;
           const percentage = Math.floor((current / target.target_amount) * 100);
+
+          // Use target's custom unit or fall back to action type unit
           const unit = target.unit || "SCU";
 
           const resourceName =
             target.resource_name ||
             target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
 
+          // Show unit in the display - this is the key change!
           return `**${resourceName}**\nTarget: ${target.target_amount} ${unit}\nCurrent: ${current} ${unit} (${percentage}%)`;
         });
 
@@ -2018,22 +2021,34 @@ async function handleAddTargetResourceSelect(interaction, combined) {
       );
     }
 
-    // Create modal for target amount
+    // Create modal for target amount AND unit selection
     const modal = new ModalBuilder()
       .setCustomId(`admin_add_target_modal_${actionType}_${resourceValue}`)
-      .setTitle(`Set Target Amount for ${resourceInfo.name}`);
+      .setTitle(`Set Target for ${resourceInfo.name}`);
 
-    // Add input field for amount with the dynamic unit
+    // Add input field for amount
     const amountInput = new TextInputBuilder()
       .setCustomId("target_amount")
-      .setLabel(`Target Amount (${actionTypeInfo.unit})`)
-      .setPlaceholder(`Enter the target amount in ${actionTypeInfo.unit}`)
+      .setLabel(`Target Amount`)
+      .setPlaceholder(`Enter the target amount`)
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
 
-    // Add rows and fields to modal
+    // Add input field for unit (with default suggestion)
+    const unitInput = new TextInputBuilder()
+      .setCustomId("target_unit")
+      .setLabel(`Unit of Measurement`)
+      .setPlaceholder(
+        `Default: ${actionTypeInfo.unit} (or enter: Units, Tons, Kg, L, etc.)`
+      )
+      .setValue(actionTypeInfo.unit) // Pre-fill with default
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    // Add rows to modal
     const firstActionRow = new ActionRowBuilder().addComponents(amountInput);
-    modal.addComponents(firstActionRow);
+    const secondActionRow = new ActionRowBuilder().addComponents(unitInput);
+    modal.addComponents(firstActionRow, secondActionRow);
 
     // Show the modal
     await interaction.showModal(modal);
@@ -2115,9 +2130,11 @@ async function handleAdminModalSubmit(interaction) {
     // Extract actionType and resourceValue from the modal ID
     // The format is admin_add_target_modal_ACTION_RESOURCE
     // Remove the prefix to get ACTION_RESOURCE
+
+    // Extract actionType and resourceValue from the modal ID
     const rawValue = modalId.replace("admin_add_target_modal_", "");
 
-    // Now find the first underscore to split action and resource
+    // Find the first underscore to split action and resource
     const firstUnderscoreIndex = rawValue.indexOf("_");
     if (firstUnderscoreIndex === -1) {
       return interaction.reply({
@@ -2134,16 +2151,19 @@ async function handleAdminModalSubmit(interaction) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-      // Get action type info for the unit and display name
+      // Get action type info
       const actionTypeInfo = await ActionTypeModel.getByName(actionType);
       if (!actionTypeInfo) {
         throw new Error(`Action type "${actionType}" not found`);
       }
 
-      // Parse the amount
+      // Parse the amount and unit
       const amount = parseInt(
         interaction.fields.getTextInputValue("target_amount")
       );
+      const customUnit = interaction.fields
+        .getTextInputValue("target_unit")
+        .trim();
 
       if (isNaN(amount) || amount <= 0) {
         return interaction.editReply({
@@ -2159,7 +2179,28 @@ async function handleAdminModalSubmit(interaction) {
         });
       }
 
+      // Validate unit input (basic validation)
+      if (!customUnit || customUnit.length === 0) {
+        return interaction.editReply({
+          content:
+            "Unit cannot be empty. Please specify a unit of measurement.",
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId("admin_back")
+                .setLabel("Back to Admin")
+                .setStyle(ButtonStyle.Secondary)
+            ),
+          ],
+        });
+      }
+
+      // Limit unit length for database storage
+      const finalUnit =
+        customUnit.length > 50 ? customUnit.substring(0, 50) : customUnit;
+
       const guildId = interaction.guild.id;
+
       // Get resource info
       const resourceInfo = await ResourceModel.getByValueAndType(
         resourceValue,
@@ -2180,11 +2221,15 @@ async function handleAdminModalSubmit(interaction) {
       );
 
       if (existingTarget) {
-        // Update existing target
-        await TargetModel.updateAmount(existingTarget.id, amount);
+        // Update existing target with new amount and unit
+        await TargetModel.updateAmountAndUnit(
+          existingTarget.id,
+          amount,
+          finalUnit
+        );
 
         await interaction.editReply({
-          content: `Updated existing target: ${actionTypeInfo.display_name} ${amount} ${actionTypeInfo.unit} of ${resourceInfo.name}`,
+          content: `Updated existing target: ${actionTypeInfo.display_name} ${amount} ${finalUnit} of ${resourceInfo.name}`,
           components: [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
@@ -2199,17 +2244,18 @@ async function handleAdminModalSubmit(interaction) {
           ],
         });
       } else {
-        // Create new target
-        await TargetModel.create(
+        // Create new target with custom unit
+        await TargetModel.createWithUnit(
           actionType,
           resourceValue,
           amount,
+          finalUnit,
           interaction.user.id,
           guildId
         );
 
         await interaction.editReply({
-          content: `Successfully set target: ${actionTypeInfo.display_name} ${amount} ${actionTypeInfo.unit} of ${resourceInfo.name}`,
+          content: `Successfully set target: ${actionTypeInfo.display_name} ${amount} ${finalUnit} of ${resourceInfo.name}`,
           components: [
             new ActionRowBuilder().addComponents(
               new ButtonBuilder()
@@ -2228,7 +2274,7 @@ async function handleAdminModalSubmit(interaction) {
       // Update dashboards
       await updateDashboards(interaction.client);
     } catch (error) {
-      console.error("Error adding target:", error);
+      console.error("Error adding target with unit:", error);
 
       await interaction.editReply({
         content: `Error adding target: ${error.message}`,

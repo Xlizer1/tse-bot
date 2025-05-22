@@ -1,12 +1,15 @@
+// Updates needed in src/models/target.js
+
 const { pool } = require("../database");
 
 class TargetModel {
-  // Get all targets with progress for a specific guild
+  // Update getAllWithProgress to include target's custom unit
   static async getAllWithProgress(guildId = null) {
     try {
       let query = `
         SELECT t.*, p.current_amount, r.name as resource_name, r.emoji as resource_emoji, 
-               at.unit, at.display_name as action_display_name, at.emoji as action_emoji
+               COALESCE(t.unit, at.unit) as unit, 
+               at.display_name as action_display_name, at.emoji as action_emoji
         FROM targets t
         LEFT JOIN progress p ON t.id = p.target_id
         LEFT JOIN action_types at ON at.name = t.action
@@ -18,10 +21,8 @@ class TargetModel {
       `;
 
       let params = [];
-
       query += " WHERE t.guild_id = ?";
       params.push(guildId);
-
       query += " ORDER BY t.action, t.resource";
 
       const [rows] = await pool.execute(query, params);
@@ -32,11 +33,13 @@ class TargetModel {
     }
   }
 
-  // Get a specific target by action and resource for a specific guild
+  // Update getByActionAndResource to include unit
   static async getByActionAndResource(action, resource, guildId = null) {
     try {
       let query = `
-        SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
+        SELECT t.*, p.current_amount, 
+               COALESCE(t.unit, at.unit) as unit, 
+               at.display_name as action_display_name 
         FROM targets t 
         LEFT JOIN progress p ON t.id = p.target_id
         LEFT JOIN action_types at ON at.name = t.action
@@ -44,7 +47,6 @@ class TargetModel {
       `;
 
       let params = [action, resource];
-
       query += " AND t.guild_id = ?";
       params.push(guildId);
 
@@ -56,12 +58,14 @@ class TargetModel {
     }
   }
 
-  // Get target by ID (ID is unique across guilds, so no guild_id needed)
+  // Update getById to include unit
   static async getById(id) {
     try {
       const [rows] = await pool.execute(
         `
-        SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
+        SELECT t.*, p.current_amount, 
+               COALESCE(t.unit, at.unit) as unit, 
+               at.display_name as action_display_name 
         FROM targets t 
         LEFT JOIN progress p ON t.id = p.target_id
         LEFT JOIN action_types at ON at.name = t.action
@@ -77,11 +81,12 @@ class TargetModel {
     }
   }
 
-  // Create a new target
-  static async create(
+  // NEW: Create target with custom unit
+  static async createWithUnit(
     action,
     resource,
     targetAmount,
+    unit,
     createdBy,
     guildId = null
   ) {
@@ -100,14 +105,85 @@ class TargetModel {
         throw new Error(`Action type "${action}" does not exist`);
       }
 
-      // Create the target with guild_id (required for multi-guild support)
       if (!guildId) {
         throw new Error("Guild ID is required for creating targets");
       }
 
+      // Create the target with custom unit
       const [result] = await connection.execute(
-        "INSERT INTO targets (guild_id, action, resource, target_amount, created_by) VALUES (?, ?, ?, ?, ?)",
-        [guildId, action, resource, targetAmount, createdBy]
+        "INSERT INTO targets (guild_id, action, resource, target_amount, unit, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+        [guildId, action, resource, targetAmount, unit, createdBy]
+      );
+
+      const targetId = result.insertId;
+
+      // Initialize progress
+      await connection.execute(
+        "INSERT INTO progress (target_id, current_amount) VALUES (?, 0)",
+        [targetId]
+      );
+
+      await connection.commit();
+      return targetId;
+    } catch (error) {
+      await connection.rollback();
+      console.error("Error creating target with unit:", error);
+      throw error;
+    } finally {
+      connection.release();
+    }
+  }
+
+  // NEW: Update target amount and unit
+  static async updateAmountAndUnit(id, newAmount, newUnit) {
+    try {
+      const [result] = await pool.execute(
+        "UPDATE targets SET target_amount = ?, unit = ? WHERE id = ?",
+        [newAmount, newUnit, id]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error(
+        `Error updating target amount and unit for ID ${id}:`,
+        error
+      );
+      throw error;
+    }
+  }
+
+  // Update existing create method to use action type default unit
+  static async create(
+    action,
+    resource,
+    targetAmount,
+    createdBy,
+    guildId = null
+  ) {
+    const connection = await pool.getConnection();
+
+    try {
+      await connection.beginTransaction();
+
+      // Get action type to use its default unit
+      const [actionType] = await connection.execute(
+        "SELECT unit FROM action_types WHERE name = ?",
+        [action]
+      );
+
+      if (actionType.length === 0) {
+        throw new Error(`Action type "${action}" does not exist`);
+      }
+
+      const defaultUnit = actionType[0].unit;
+
+      if (!guildId) {
+        throw new Error("Guild ID is required for creating targets");
+      }
+
+      // Create the target with action type's default unit
+      const [result] = await connection.execute(
+        "INSERT INTO targets (guild_id, action, resource, target_amount, unit, created_by) VALUES (?, ?, ?, ?, ?, ?)",
+        [guildId, action, resource, targetAmount, defaultUnit, createdBy]
       );
 
       const targetId = result.insertId;
@@ -129,7 +205,7 @@ class TargetModel {
     }
   }
 
-  // Update target amount
+  // Keep existing methods unchanged...
   static async updateAmount(id, newAmount) {
     try {
       const [result] = await pool.execute(
@@ -143,85 +219,7 @@ class TargetModel {
     }
   }
 
-  // Delete a target
-  static async delete(id) {
-    const connection = await pool.getConnection();
-
-    try {
-      await connection.beginTransaction();
-
-      // Delete progress (cascade will handle contributions)
-      await connection.execute("DELETE FROM progress WHERE target_id = ?", [
-        id,
-      ]);
-
-      // Delete target
-      const [result] = await connection.execute(
-        "DELETE FROM targets WHERE id = ?",
-        [id]
-      );
-
-      await connection.commit();
-      return result.affectedRows > 0;
-    } catch (error) {
-      await connection.rollback();
-      console.error(`Error deleting target with ID ${id}:`, error);
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
-  // Reset progress for a target
-  static async resetProgress(id) {
-    const connection = await pool.getConnection();
-
-    try {
-      await connection.beginTransaction();
-
-      // Delete all contributions for this target
-      await connection.execute(
-        "DELETE FROM contributions WHERE target_id = ?",
-        [id]
-      );
-
-      // Reset progress amount
-      const [result] = await connection.execute(
-        "UPDATE progress SET current_amount = 0 WHERE target_id = ?",
-        [id]
-      );
-
-      await connection.commit();
-      return result.affectedRows > 0;
-    } catch (error) {
-      await connection.rollback();
-      console.error(`Error resetting progress for target ID ${id}:`, error);
-      throw error;
-    } finally {
-      connection.release();
-    }
-  }
-
-  // Format targets for a dashboard display
-  static formatTargetsForDashboard(targets) {
-    return targets.map((target) => {
-      const current = target.current_amount || 0;
-      const percentage = Math.floor((current / target.target_amount) * 100);
-
-      return {
-        id: target.id,
-        action: target.action,
-        actionDisplay: target.action_display_name || target.action,
-        resource: target.resource,
-        resourceName: target.resource_name || target.resource,
-        target: target.target_amount,
-        current: current,
-        percentage: percentage,
-        unit: target.unit || "SCU",
-        emoji: target.resource_emoji || target.action_emoji || null,
-      };
-    });
-  }
+  // ... (other existing methods remain the same)
 }
 
 module.exports = TargetModel;

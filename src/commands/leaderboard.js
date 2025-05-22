@@ -1,3 +1,5 @@
+// Fixed version of src/commands/leaderboard.js with correct percentage calculations
+
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -6,8 +8,8 @@ const {
 const TargetModel = require("../models/target");
 const ContributionModel = require("../models/contribution");
 
-function createContributionBar(amount, maxAmount, length = 10) {
-  const filledLength = Math.round((amount / maxAmount) * length);
+function createContributionBar(percentage, length = 10) {
+  const filledLength = Math.round((percentage / 100) * length);
   const emptyLength = length - filledLength;
 
   const filledEmoji = "🟩"; // Green square for filled
@@ -20,6 +22,21 @@ function getContributionColor(percentage) {
   if (percentage >= 25) return 0x4caf50; // Green for substantial contributors
   if (percentage >= 10) return 0x2196f3; // Blue for moderate contributors
   return 0x9e9e9e; // Gray for minor contributors
+}
+
+// FIXED: Proper percentage calculation with rounding and validation
+function calculatePercentage(part, total, decimals = 1) {
+  if (!total || total === 0) return 0;
+  const percentage = (part / total) * 100;
+  return (
+    Math.round(percentage * Math.pow(10, decimals)) / Math.pow(10, decimals)
+  );
+}
+
+// FIXED: Ensure proper number conversion
+function ensureNumber(value) {
+  const num = typeof value === "string" ? parseInt(value, 10) : value;
+  return isNaN(num) ? 0 : num;
 }
 
 module.exports = {
@@ -69,14 +86,14 @@ module.exports = {
     try {
       // Use provided guildId or fallback to interaction guild
       const currentGuildId = guildId || interaction.guild?.id;
-      
+
       if (!currentGuildId) {
         return interaction.reply({
           content: "This command can only be used in a server.",
           flags: MessageFlags.Ephemeral,
         });
       }
-      
+
       await interaction.deferReply(); // Use defer since this might take time
 
       // Get filter options
@@ -144,7 +161,7 @@ module.exports = {
         return interaction.editReply({ embeds: [embed] });
       }
 
-      // Collect and calculate user contributions
+      // FIXED: Collect and calculate user contributions with proper number handling
       const userContributions = new Map();
       let contributionsFound = false;
       let grandTotal = 0;
@@ -172,9 +189,10 @@ module.exports = {
           return true;
         });
 
-        // Count contributions by user
+        // FIXED: Count contributions by user with proper number conversion
         for (const contribution of filteredContributions) {
           const userId = contribution.user_id;
+          const amount = ensureNumber(contribution.amount); // Ensure it's a number
 
           if (!userContributions.has(userId)) {
             userContributions.set(userId, {
@@ -187,8 +205,8 @@ module.exports = {
           }
 
           const userData = userContributions.get(userId);
-          userData.total += contribution.amount;
-          grandTotal += contribution.amount;
+          userData.total += amount;
+          grandTotal += amount;
 
           // Track by action type
           if (!userData.actions.has(target.action)) {
@@ -196,7 +214,7 @@ module.exports = {
           }
           userData.actions.set(
             target.action,
-            userData.actions.get(target.action) + contribution.amount
+            userData.actions.get(target.action) + amount
           );
 
           // Update latest contribution time
@@ -210,8 +228,22 @@ module.exports = {
       }
 
       if (!contributionsFound) {
+        if (resourceFilter) {
+          embed.setDescription(
+            `No contributions found for resource: ${resourceFilter} in this server.`
+          );
+        } else {
+          embed.setDescription(
+            "No contributions found with the specified filters for this server."
+          );
+        }
+        return interaction.editReply({ embeds: [embed] });
+      }
+
+      // FIXED: Validate grandTotal before percentage calculations
+      if (grandTotal === 0) {
         embed.setDescription(
-          "No contributions found with the specified filters for this server."
+          "No contributions found for the specified criteria."
         );
         return interaction.editReply({ embeds: [embed] });
       }
@@ -224,25 +256,41 @@ module.exports = {
       // Find max contribution for bar scaling
       const maxContribution = sortedUsers[0]?.total || 1;
 
-      // Add field for each user
+      // FIXED: Add field for each user with proper percentage calculations
       sortedUsers.forEach((userData, index) => {
-        // Create detailed contribution breakdown
-        let detailText = "";
-        const contributionPercentage = Math.floor(
-          (userData.total / grandTotal) * 100
-        );
-        const contributionBar = createContributionBar(
+        // Calculate the user's percentage of total contributions
+        const contributionPercentage = calculatePercentage(
           userData.total,
-          maxContribution
+          grandTotal,
+          1
         );
 
-        // Breakdown by action type
+        // ✅ NEW: Bar filled based on actual percentage, not relative to max user
+        const contributionBar = createContributionBar(contributionPercentage);
+
+        // Breakdown by action type with validation
+        let detailText = "";
+        let actionTotalCheck = 0;
+
         userData.actions.forEach((amount, action) => {
-          const actionPercentage = Math.floor((amount / userData.total) * 100);
+          const actionPercentage = calculatePercentage(
+            amount,
+            userData.total,
+            1
+          );
+          actionTotalCheck += amount;
+
           detailText += `${
             action.charAt(0).toUpperCase() + action.slice(1)
           }: ${amount} SCU (${actionPercentage}%)\n`;
         });
+
+        // Add validation warning if totals don't match
+        if (Math.abs(actionTotalCheck - userData.total) > 0.01) {
+          console.warn(
+            `User ${userData.username}: Action totals (${actionTotalCheck}) don't match user total (${userData.total})`
+          );
+        }
 
         // Add emoji for top 3
         const rankEmoji =
@@ -266,36 +314,61 @@ module.exports = {
         });
       });
 
-      // Add comprehensive statistics field
+      // FIXED: Add comprehensive statistics field with validation
+      const totalContributors = userContributions.size;
+      const averageContribution =
+        totalContributors > 0 ? Math.round(grandTotal / totalContributors) : 0;
+
       embed.addFields({
         name: "📊 Collection Overview",
         value: [
-          `**Total Contributions**: ${grandTotal} SCU`,
-          `**Average Contribution**: ${Math.floor(
-            grandTotal / sortedUsers.length
-          )} SCU per top contributor`,
-          `**Unique Contributors**: ${userContributions.size}`,
+          `**Total Contributions**: ${grandTotal.toLocaleString()} SCU`,
+          `**Average Contribution**: ${averageContribution.toLocaleString()} SCU per contributor`,
+          `**Unique Contributors**: ${totalContributors}`,
+          `**Percentage Calculation**: Based on ${grandTotal.toLocaleString()} total SCU`,
         ].join("\n"),
       });
 
-      // Conditional field for action type stats if filtered
+      // FIXED: Conditional field for action type stats with proper calculations
       if (actionFilter !== "all") {
         const actionTotal = sortedUsers.reduce((sum, user) => {
-          const actionAmount = user.actions.get(actionFilter) || 0;
+          const actionAmount = ensureNumber(
+            user.actions.get(actionFilter) || 0
+          );
           return sum + actionAmount;
         }, 0);
+
+        const actionPercentage = calculatePercentage(
+          actionTotal,
+          grandTotal,
+          1
+        );
 
         embed.addFields({
           name: `🎯 ${
             actionFilter.charAt(0).toUpperCase() + actionFilter.slice(1)
           } Contribution Insights`,
           value: [
-            `**Total ${actionFilter} Contributions**: ${actionTotal} SCU`,
-            `**Percentage of Overall**: ${Math.floor(
-              (actionTotal / grandTotal) * 100
-            )}%`,
+            `**Total ${actionFilter} Contributions**: ${actionTotal.toLocaleString()} SCU`,
+            `**Percentage of Overall**: ${actionPercentage}%`,
+            `**Average per Top ${
+              sortedUsers.length
+            } Contributors**: ${Math.round(
+              actionTotal / sortedUsers.length
+            )} SCU`,
           ].join("\n"),
         });
+      }
+
+      // FIXED: Add debug info for percentage validation (only in development)
+      if (process.env.NODE_ENV === "development") {
+        const percentageSum = sortedUsers.reduce((sum, user) => {
+          return sum + calculatePercentage(user.total, grandTotal, 1);
+        }, 0);
+
+        console.log(
+          `DEBUG: Total percentage sum: ${percentageSum}% (should be ≤ 100%)`
+        );
       }
 
       await interaction.editReply({ embeds: [embed] });
