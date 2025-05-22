@@ -12,8 +12,7 @@ function setupAutoReporting(client) {
 async function checkAndSendReport(client) {
   try {
     // Get auto-report settings from database
-    const guildId2 = interaction.guild.id;
-    const autoReport = await SettingModel.getAutoReport(guildId2);
+    const autoReport = await SettingModel.getAutoReport();
 
     // Check if auto-reporting is enabled
     if (!autoReport || !autoReport.enabled) return;

@@ -69,10 +69,17 @@ class SettingModel {
   static async get(key, guildId = null) {
     try {
       let rows;
-      [rows] = await pool.execute(
-        "SELECT * FROM settings WHERE setting_key = ? AND guild_id = ?",
-        [key, guildId]
-      );
+      if (guildId) {
+        [rows] = await pool.execute(
+          "SELECT * FROM settings WHERE setting_key = ? AND guild_id = ?",
+          [key, guildId]
+        );
+      } else {
+        [rows] = await pool.execute(
+          "SELECT * FROM settings WHERE setting_key = ?",
+          [key]
+        );
+      }
 
       if (rows.length === 0) return null;
 
