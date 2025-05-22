@@ -40,7 +40,7 @@ async function generateDashboardInsights(guildId) {
     // Get all targets for this guild
     const targets = await TargetModel.getAllWithProgress(guildId);
     const actionTypes = await ActionTypeModel.getAll();
-    const topContributors = await ContributionModel.getTopContributors(3);
+    const topContributors = await ContributionModel.getTopContributors(3, guildId);
 
     // Calculate overall stats
     const totalTargets = targets.length;

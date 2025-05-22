@@ -105,8 +105,9 @@ const getResourceEmoji = (resourceName) => {
 // Resource Management Button Handler
 async function handleResourcesButton(interaction) {
   try {
+    const guildId = interaction.guild.id;
     // Load resources from database with action types
-    const groupedResources = await ResourceModel.getGroupedResources();
+    const groupedResources = await ResourceModel.getGroupedResources(guildId);
 
     // Get all action types
     const actionTypes = await ActionTypeModel.getAll();
@@ -205,8 +206,9 @@ async function handleResourcesButton(interaction) {
 // Target Management
 async function handleTargetsButton(interaction) {
   try {
+    const guildId = interaction.guild.id;
     // Get all targets with progress from database
-    const targets = await TargetModel.getAllWithProgress();
+    const targets = await TargetModel.getAllWithProgress(guildId);
 
     // Create targets embed
     const targetsEmbed = new EmbedBuilder()
@@ -248,15 +250,12 @@ async function handleTargetsButton(interaction) {
         // Create field values for this action type
         const targetStrings = actionTargets.map((target) => {
           const current = target.current_amount || 0;
-          const percentage = Math.floor(
-            (current / target.target_amount) * 100
-          );
+          const percentage = Math.floor((current / target.target_amount) * 100);
           const unit = target.unit || "SCU";
 
           const resourceName =
             target.resource_name ||
-            target.resource.charAt(0).toUpperCase() +
-              target.resource.slice(1);
+            target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
 
           return `**${resourceName}**\nTarget: ${target.target_amount} ${unit}\nCurrent: ${current} ${unit} (${percentage}%)`;
         });
@@ -268,16 +267,20 @@ async function handleTargetsButton(interaction) {
 
         for (let i = 0; i < targetStrings.length; i++) {
           const targetString = targetStrings[i];
-          
+
           // Check if adding this target would exceed the limit
-          const testValue = currentFieldValue + (currentFieldValue ? "\n\n" : "") + targetString;
-          
+          const testValue =
+            currentFieldValue +
+            (currentFieldValue ? "\n\n" : "") +
+            targetString;
+
           if (testValue.length > maxFieldLength && currentFieldValue) {
             // Add current field and start a new one
-            const fieldName = fieldCounter === 1 
-              ? `${actionEmoji} ${actionDisplay} Targets` 
-              : `${actionEmoji} ${actionDisplay} Targets (${fieldCounter})`;
-            
+            const fieldName =
+              fieldCounter === 1
+                ? `${actionEmoji} ${actionDisplay} Targets`
+                : `${actionEmoji} ${actionDisplay} Targets (${fieldCounter})`;
+
             targetsEmbed.addFields({
               name: fieldName,
               value: currentFieldValue,
@@ -294,10 +297,11 @@ async function handleTargetsButton(interaction) {
 
         // Add the final field if there's content
         if (currentFieldValue) {
-          const fieldName = fieldCounter === 1 
-            ? `${actionEmoji} ${actionDisplay} Targets` 
-            : `${actionEmoji} ${actionDisplay} Targets (${fieldCounter})`;
-          
+          const fieldName =
+            fieldCounter === 1
+              ? `${actionEmoji} ${actionDisplay} Targets`
+              : `${actionEmoji} ${actionDisplay} Targets (${fieldCounter})`;
+
           targetsEmbed.addFields({
             name: fieldName,
             value: currentFieldValue,
@@ -366,7 +370,8 @@ async function handleExportButton(interaction) {
 
   try {
     // Get all targets with progress
-    const targets = await TargetModel.getAllWithProgress();
+    const guildId = interaction.guild.id;
+    const targets = await TargetModel.getAllWithProgress(guildId);
 
     // Create a new workbook
     const workbook = new ExcelJS.Workbook();
@@ -878,9 +883,10 @@ async function handleExportButton(interaction) {
 // Display controls
 async function handleDisplayButton(interaction) {
   try {
+    const guildId = interaction.guild.id;
     // Load dashboards and settings from database
-    const dashboards = await DashboardModel.getAll();
-    const autoReport = await SettingModel.getAutoReport();
+    const dashboards = await DashboardModel.getAll(guildId);
+    const autoReport = await SettingModel.getAutoReport(guildId);
 
     // Create display embed
     const displayEmbed = new EmbedBuilder()
@@ -958,8 +964,9 @@ async function handleDisplayButton(interaction) {
 // System stats
 async function handleStatsButton(interaction) {
   try {
+    const guildId = interaction.guild.id;
     // Get targets with progress
-    const targets = await TargetModel.getAllWithProgress();
+    const targets = await TargetModel.getAllWithProgress(guildId);
 
     // Get dashboards
     const dashboards = await DashboardModel.getAll();
@@ -993,9 +1000,8 @@ async function handleStatsButton(interaction) {
         }
       }
     }
-
     // Get resource counts by type
-    const resources = await ResourceModel.getGroupedResources();
+    const resources = await ResourceModel.getGroupedResources(guildId);
     const resourceCounts = {
       mining: resources.mining ? resources.mining.length : 0,
       salvage: resources.salvage ? resources.salvage.length : 0,
@@ -1173,14 +1179,16 @@ async function handleAddResourceButton(interaction) {
       const option = {
         label: type.display_name,
         value: type.name,
-        description: `Add a new ${type.display_name.toLowerCase()} resource (${type.unit})`,
+        description: `Add a new ${type.display_name.toLowerCase()} resource (${
+          type.unit
+        })`,
       };
-      
+
       // Only add emoji if it exists and is not null
       if (type.emoji && type.emoji !== null) {
         option.emoji = type.emoji;
       }
-      
+
       selectMenu.components[0].addOptions(option);
     });
 
@@ -1203,7 +1211,8 @@ async function handleAddResourceButton(interaction) {
 async function handleRemoveResourceButton(interaction) {
   try {
     // Load grouped resources from database
-    const groupedResources = await ResourceModel.getGroupedResources();
+    const guildId = interaction.guild.id;
+    const groupedResources = await ResourceModel.getGroupedResources(guildId);
 
     // Create select menu for resource selection
     const row1 = new ActionRowBuilder().addComponents(
@@ -1266,14 +1275,16 @@ async function handleAddTargetButton(interaction) {
       const option = {
         label: type.display_name,
         value: type.name,
-        description: `Add a new ${type.display_name.toLowerCase()} target (${type.unit})`,
+        description: `Add a new ${type.display_name.toLowerCase()} target (${
+          type.unit
+        })`,
       };
-      
+
       // Only add emoji if it exists and is not null
       if (type.emoji && type.emoji !== null) {
         option.emoji = type.emoji;
       }
-      
+
       row.components[0].addOptions(option);
     });
 
@@ -1295,8 +1306,9 @@ async function handleAddTargetButton(interaction) {
 // Reset target button handler
 async function handleResetTargetButton(interaction) {
   try {
+    const guildId = interaction.guild.id;
     // Get all targets with progress
-    const targets = await TargetModel.getAllWithProgress();
+    const targets = await TargetModel.getAllWithProgress(guildId);
 
     // Check if there are any targets
     if (targets.length === 0) {
@@ -1371,8 +1383,9 @@ async function handleResetTargetButton(interaction) {
 // Reset progress button handler
 async function handleResetProgressButton(interaction) {
   try {
+    const guildId = interaction.guild.id;
     // Get all targets with progress
-    const targets = await TargetModel.getAllWithProgress();
+    const targets = await TargetModel.getAllWithProgress(guildId);
 
     // Check if there are any targets
     if (targets.length === 0) {
@@ -1472,8 +1485,9 @@ async function handleCreateDashboardButton(interaction) {
 // Auto report button handler
 async function handleAutoReportButton(interaction) {
   try {
+    const guildId = interaction.guild.id;
     // Load auto report settings from database
-    const autoReport = await SettingModel.getAutoReport();
+    const autoReport = await SettingModel.getAutoReport(guildId);
 
     // Create modal for auto-report settings
     const modal = new ModalBuilder()
@@ -1624,8 +1638,9 @@ async function handleResourceActionSelect(interaction, actionType) {
 // Handle remove resource action selection
 async function handleRemoveResourceActionSelect(interaction, actionType) {
   try {
+    const guildId = interaction.guild.id;
     // Get resources for this action type
-    const resources = await ResourceModel.getByActionType(actionType);
+    const resources = await ResourceModel.getByActionType(actionType, guildId);
 
     // Check if there are resources to remove
     if (resources.length === 0) {
@@ -1700,8 +1715,10 @@ async function handleTargetActionSelect(interaction, actionType) {
       });
     }
 
+    const guildId = interaction.guild.id;
+
     // Get resources for the action type
-    const resources = await ResourceModel.getByActionType(actionType);
+    const resources = await ResourceModel.getByActionType(actionType, guildId);
 
     // Check if there are resources available
     if (resources.length === 0) {
@@ -1786,9 +1803,11 @@ async function handleResetTargetSelect(interaction, targetId) {
         ? "salvage"
         : "haul";
 
+    const guildId = interaction.guild.id;
     const resource = await ResourceModel.getByValueAndType(
       target.resource,
-      resourceCategory
+      resourceCategory,
+      guildId
     );
     const resourceName = resource
       ? resource.name
@@ -1853,9 +1872,11 @@ async function handleResetProgressSelect(interaction, targetId) {
         ? "salvage"
         : "haul";
 
+    const guildId = interaction.guild.id;
     const resource = await ResourceModel.getByValueAndType(
       target.resource,
-      resourceCategory
+      resourceCategory,
+      guildId
     );
     const resourceName = resource
       ? resource.name
@@ -1922,10 +1943,12 @@ async function handleRemoveResourceSelect(interaction, resourceValue) {
 
     const actionType = actionMatch[1];
 
+    const guildId = interaction.guild.id;
     // Find the resource
     const resource = await ResourceModel.getByValueAndType(
       resourceValue,
-      actionType
+      actionType,
+      guildId
     );
 
     if (!resource) {
@@ -1933,7 +1956,7 @@ async function handleRemoveResourceSelect(interaction, resourceValue) {
     }
 
     // Remove the resource
-    await ResourceModel.remove(resourceValue, actionType);
+    await ResourceModel.remove(resourceValue, actionType, guildId);
 
     // Success message
     await interaction.update({
@@ -1981,10 +2004,13 @@ async function handleAddTargetResourceSelect(interaction, combined) {
       throw new Error(`Action type "${actionType}" not found`);
     }
 
+    const guildId = interaction.guild.id;
+
     // Get the resource info for the name
     const resourceInfo = await ResourceModel.getByValueAndType(
       resourceValue,
-      actionType
+      actionType,
+      guildId
     );
     if (!resourceInfo) {
       throw new Error(
@@ -2048,8 +2074,9 @@ async function handleAdminModalSubmit(interaction) {
         throw new Error(`Action type "${actionType}" not found`);
       }
 
+      const guildId = interaction.guild.id;
       // Add resource to database
-      await ResourceModel.add(name, value, actionType);
+      await ResourceModel.add(name, value, actionType, guildId);
 
       // Success message
       await interaction.reply({
@@ -2089,16 +2116,17 @@ async function handleAdminModalSubmit(interaction) {
     // The format is admin_add_target_modal_ACTION_RESOURCE
     // Remove the prefix to get ACTION_RESOURCE
     const rawValue = modalId.replace("admin_add_target_modal_", "");
-    
+
     // Now find the first underscore to split action and resource
-    const firstUnderscoreIndex = rawValue.indexOf('_');
+    const firstUnderscoreIndex = rawValue.indexOf("_");
     if (firstUnderscoreIndex === -1) {
       return interaction.reply({
-        content: "Invalid modal ID format. Cannot determine action and resource.",
+        content:
+          "Invalid modal ID format. Cannot determine action and resource.",
         flags: MessageFlags.Ephemeral,
       });
     }
-    
+
     const actionType = rawValue.substring(0, firstUnderscoreIndex);
     const resourceValue = rawValue.substring(firstUnderscoreIndex + 1);
 
@@ -2111,7 +2139,7 @@ async function handleAdminModalSubmit(interaction) {
       if (!actionTypeInfo) {
         throw new Error(`Action type "${actionType}" not found`);
       }
-      
+
       // Parse the amount
       const amount = parseInt(
         interaction.fields.getTextInputValue("target_amount")
@@ -2131,16 +2159,24 @@ async function handleAdminModalSubmit(interaction) {
         });
       }
 
+      const guildId = interaction.guild.id;
       // Get resource info
-      const resourceInfo = await ResourceModel.getByValueAndType(resourceValue, actionType);
+      const resourceInfo = await ResourceModel.getByValueAndType(
+        resourceValue,
+        actionType,
+        guildId
+      );
       if (!resourceInfo) {
-        throw new Error(`Resource "${resourceValue}" not found for action type "${actionType}"`);
+        throw new Error(
+          `Resource "${resourceValue}" not found for action type "${actionType}"`
+        );
       }
 
       // Check if target already exists
       const existingTarget = await TargetModel.getByActionAndResource(
         actionType,
-        resourceValue
+        resourceValue,
+        guildId
       );
 
       if (existingTarget) {
@@ -2168,7 +2204,8 @@ async function handleAdminModalSubmit(interaction) {
           actionType,
           resourceValue,
           amount,
-          interaction.user.id
+          interaction.user.id,
+          guildId
         );
 
         await interaction.editReply({

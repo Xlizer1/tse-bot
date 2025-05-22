@@ -16,16 +16,14 @@ class TargetModel {
             ELSE 1=0
           END
       `;
-      
+
       let params = [];
-      
-      if (guildId) {
-        query += " WHERE t.guild_id = ?";
-        params.push(guildId);
-      }
-      
+
+      query += " WHERE t.guild_id = ?";
+      params.push(guildId);
+
       query += " ORDER BY t.action, t.resource";
-      
+
       const [rows] = await pool.execute(query, params);
       return rows;
     } catch (error) {
@@ -44,14 +42,12 @@ class TargetModel {
         LEFT JOIN action_types at ON at.name = t.action
         WHERE t.action = ? AND t.resource = ?
       `;
-      
+
       let params = [action, resource];
-      
-      if (guildId) {
-        query += " AND t.guild_id = ?";
-        params.push(guildId);
-      }
-      
+
+      query += " AND t.guild_id = ?";
+      params.push(guildId);
+
       const [rows] = await pool.execute(query, params);
       return rows[0] || null;
     } catch (error) {
@@ -63,14 +59,17 @@ class TargetModel {
   // Get target by ID (ID is unique across guilds, so no guild_id needed)
   static async getById(id) {
     try {
-      const [rows] = await pool.execute(`
+      const [rows] = await pool.execute(
+        `
         SELECT t.*, p.current_amount, at.unit, at.display_name as action_display_name 
         FROM targets t 
         LEFT JOIN progress p ON t.id = p.target_id
         LEFT JOIN action_types at ON at.name = t.action
         WHERE t.id = ?
-      `, [id]);
-      
+      `,
+        [id]
+      );
+
       return rows[0] || null;
     } catch (error) {
       console.error(`Error getting target with ID ${id}:`, error);
@@ -79,7 +78,13 @@ class TargetModel {
   }
 
   // Create a new target
-  static async create(action, resource, targetAmount, createdBy, guildId = null) {
+  static async create(
+    action,
+    resource,
+    targetAmount,
+    createdBy,
+    guildId = null
+  ) {
     const connection = await pool.getConnection();
 
     try {
@@ -90,7 +95,7 @@ class TargetModel {
         "SELECT COUNT(*) as count FROM action_types WHERE name = ?",
         [action]
       );
-      
+
       if (actionExists[0].count === 0) {
         throw new Error(`Action type "${action}" does not exist`);
       }
@@ -99,7 +104,7 @@ class TargetModel {
       if (!guildId) {
         throw new Error("Guild ID is required for creating targets");
       }
-      
+
       const [result] = await connection.execute(
         "INSERT INTO targets (guild_id, action, resource, target_amount, created_by) VALUES (?, ?, ?, ?, ?)",
         [guildId, action, resource, targetAmount, createdBy]
@@ -213,7 +218,7 @@ class TargetModel {
         current: current,
         percentage: percentage,
         unit: target.unit || "SCU",
-        emoji: target.resource_emoji || target.action_emoji || null
+        emoji: target.resource_emoji || target.action_emoji || null,
       };
     });
   }

@@ -12,7 +12,8 @@ function setupAutoReporting(client) {
 async function checkAndSendReport(client) {
   try {
     // Get auto-report settings from database
-    const autoReport = await SettingModel.getAutoReport();
+    const guildId2 = interaction.guild.id;
+    const autoReport = await SettingModel.getAutoReport(guildId2);
 
     // Check if auto-reporting is enabled
     if (!autoReport || !autoReport.enabled) return;
@@ -43,7 +44,7 @@ async function checkAndSendReport(client) {
       }
 
       // Generate and send the report
-      await sendDailyReport(channel);
+      await sendDailyReport(channel, guildId);
 
       // Update last report date
       autoReport.lastReportDate = currentDate;
@@ -57,10 +58,10 @@ async function checkAndSendReport(client) {
   }
 }
 
-async function sendDailyReport(channel) {
+async function sendDailyReport(channel, guildId) {
   try {
     // Get all targets with progress
-    const targets = await TargetModel.getAllWithProgress();
+    const targets = await TargetModel.getAllWithProgress(guildId);
 
     // Create embed for progress report
     const progressEmbed = new EmbedBuilder()

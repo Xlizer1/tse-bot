@@ -60,9 +60,10 @@ async function deployCommands() {
                   : actionValue === "salvage"
                   ? "salvage"
                   : "haul";
-
               // Get resources for this action type from database
-              const resources = await ResourceModel.getByActionType(actionType);
+              const resources = await ResourceModel.getByActionType(
+                actionType
+              );
               const resourceChoices = resources.map((r) => ({
                 name: r.name,
                 value: r.value,
@@ -74,12 +75,15 @@ async function deployCommands() {
               // Create a variant command name - ensure it's lowercase and valid
               // Discord command names must be between 1-32 characters, lowercase, and contain only alphanumeric or underscore
               // Fix: Ensure the variant name is within Discord's limits and properly formatted
-              const variantName = `${commandData.name}-${actionValue}`.toLowerCase();
-              
+              const variantName =
+                `${commandData.name}-${actionValue}`.toLowerCase();
+
               if (variantName.length > 32) {
-                console.warn(`Warning: Command name "${variantName}" exceeds 32 characters and will be truncated.`);
+                console.warn(
+                  `Warning: Command name "${variantName}" exceeds 32 characters and will be truncated.`
+                );
               }
-              
+
               // Create a separate command variant for this action
               const variantCommand = {
                 ...commandData,
@@ -125,7 +129,9 @@ async function deployCommands() {
                   : "haul";
 
               // Get resources for this action type from database
-              const resources = await ResourceModel.getByActionType(actionType);
+              const resources = await ResourceModel.getByActionType(
+                actionType
+              );
               const resourceChoices = resources.map((r) => ({
                 name: r.name,
                 value: r.value,

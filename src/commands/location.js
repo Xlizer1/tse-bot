@@ -91,8 +91,9 @@ module.exports = {
         )
         .setTimestamp();
 
+      const guildId = interaction.guild.id;
       // Get all targets
-      let targets = await TargetModel.getAllWithProgress();
+      let targets = await TargetModel.getAllWithProgress(guildId);
 
       // Filter targets if resource filter provided
       if (resourceFilter) {
@@ -172,8 +173,8 @@ module.exports = {
         .sort((a, b) => b.totalAmount - a.totalAmount)
         .slice(0, 10); // Top 10 locations
 
-      // Get resource info for display names
-      const resources = await ResourceModel.getAll();
+      // Get resource info for display name
+      const resources = await ResourceModel.getAll(guildId);
       const resourceMap = new Map();
       resources.forEach((resource) => {
         resourceMap.set(

@@ -20,8 +20,6 @@ const {
 async function handleButtonInteraction(interaction, guildId) {
   // Use provided guildId or fallback to interaction guild
   const currentGuildId = guildId || interaction.guild?.id;
-
-  console.log(currentGuildId)
   
   if (!currentGuildId) {
     return interaction.reply({

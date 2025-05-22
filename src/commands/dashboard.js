@@ -64,9 +64,13 @@ module.exports = {
 
     try {
       // Fetch comprehensive data
-      const targets = await TargetModel.getAllWithProgress();
-      const resources = await ResourceModel.getAll();
-      const topContributors = await ContributionModel.getTopContributors(3);
+      const guildId = interaction.guild.id;
+      const targets = await TargetModel.getAllWithProgress(guildId);
+      const resources = await ResourceModel.getAll(guildId);
+      const topContributors = await ContributionModel.getTopContributors(
+        3,
+        guildId
+      );
 
       // Calculate overall statistics
       const totalTargets = targets.length;

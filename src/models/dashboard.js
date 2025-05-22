@@ -18,13 +18,11 @@ class DashboardModel {
   // Get all dashboards, optionally filter by guild
   static async getAll(guildId = null) {
     try {
-      if (guildId) {
-        const [rows] = await pool.execute("SELECT * FROM dashboards WHERE guild_id = ?", [guildId]);
-        return rows;
-      } else {
-        const [rows] = await pool.execute("SELECT * FROM dashboards");
-        return rows;
-      }
+      const [rows] = await pool.execute(
+        "SELECT * FROM dashboards WHERE guild_id = ?",
+        [guildId]
+      );
+      return rows;
     } catch (error) {
       console.error("Error getting dashboards:", error);
       throw error;
@@ -71,17 +69,10 @@ class SettingModel {
   static async get(key, guildId = null) {
     try {
       let rows;
-      if (guildId) {
-        [rows] = await pool.execute(
-          "SELECT * FROM settings WHERE setting_key = ? AND guild_id = ?",
-          [key, guildId]
-        );
-      } else {
-        [rows] = await pool.execute(
-          "SELECT * FROM settings WHERE setting_key = ?",
-          [key]
-        );
-      }
+      [rows] = await pool.execute(
+        "SELECT * FROM settings WHERE setting_key = ? AND guild_id = ?",
+        [key, guildId]
+      );
 
       if (rows.length === 0) return null;
 
@@ -134,21 +125,11 @@ class SettingModel {
       const jsonValue =
         typeof value === "string" ? value : JSON.stringify(value);
 
-      if (guildId) {
-        // Use INSERT ... ON DUPLICATE KEY UPDATE with guild_id
-        const [result] = await pool.execute(
-          "INSERT INTO settings (setting_key, setting_value, guild_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
-          [key, jsonValue, guildId, jsonValue]
-        );
-        return result.affectedRows > 0;
-      } else {
-        // For backward compatibility
-        const [result] = await pool.execute(
-          "INSERT INTO settings (setting_key, setting_value) VALUES (?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
-          [key, jsonValue, jsonValue]
-        );
-        return result.affectedRows > 0;
-      }
+      const [result] = await pool.execute(
+        "INSERT INTO settings (setting_key, setting_value, guild_id) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE setting_value = ?",
+        [key, jsonValue, guildId, jsonValue]
+      );
+      return result.affectedRows > 0;
     } catch (error) {
       console.error(`Error setting ${key}:`, error);
       throw error;

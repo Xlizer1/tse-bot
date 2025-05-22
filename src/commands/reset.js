@@ -74,7 +74,8 @@ module.exports = {
       if (subcommand === "all") {
         // This operation is more complex with a database
         // We'll list all targets first
-        const targets = await TargetModel.getAllWithProgress();
+        const guildId = interaction.guild.id;
+        const targets = await TargetModel.getAllWithProgress(guildId);
 
         if (targets.length === 0) {
           return interaction.reply({
@@ -98,10 +99,12 @@ module.exports = {
           .getString("resource")
           .toLowerCase();
 
+        const guildId = interaction.guild.id;
         // Get the target
         const target = await TargetModel.getByActionAndResource(
           action,
-          resource
+          resource,
+          guildId
         );
 
         if (!target) {

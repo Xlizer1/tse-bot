@@ -46,8 +46,13 @@ module.exports = {
       const amount = interaction.options.getInteger("amount");
       const location = interaction.options.getString("location");
 
+      const guildId = interaction.guild.id;
       // Get the target for this action and resource
-      const target = await TargetModel.getByActionAndResource(action, resource);
+      const target = await TargetModel.getByActionAndResource(
+        action,
+        resource,
+        guildId
+      );
 
       if (!target) {
         return interaction.reply({
@@ -84,7 +89,8 @@ module.exports = {
 
       const resourceInfo = await ResourceModel.getByValueAndType(
         resource,
-        resourceCategory
+        resourceCategory,
+        guildId
       );
       const resourceName = resourceInfo
         ? resourceInfo.name

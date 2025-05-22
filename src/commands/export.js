@@ -28,8 +28,9 @@ module.exports = {
       // Defer reply as this might take a moment
       await interaction.deferReply();
 
+      const guildId = interaction.guild.id;
       // Get all targets with progress
-      const targets = await TargetModel.getAllWithProgress();
+      const targets = await TargetModel.getAllWithProgress(guildId);
 
       if (targets.length === 0) {
         return interaction.editReply({

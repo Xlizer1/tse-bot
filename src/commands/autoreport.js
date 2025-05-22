@@ -71,7 +71,8 @@ module.exports = {
         );
       } else if (subcommand === "disable") {
         // Get current settings first
-        const currentSettings = await SettingModel.getAutoReport();
+        const guildId = interaction.guild.id;
+        const currentSettings = await SettingModel.getAutoReport(guildId);
 
         // Disable auto reports but keep other settings
         const autoReportSettings = {
