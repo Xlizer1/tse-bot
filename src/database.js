@@ -1,219 +1,322 @@
 const mysql = require("mysql2/promise");
 require("dotenv").config();
 
-// Create connection pool
+// Validate required environment variables
+const requiredEnvVars = ['DB_HOST', 'DB_USER', 'DB_NAME', 'TOKEN', 'CLIENT_ID'];
+const missingEnvVars = requiredEnvVars.filter(envVar => !process.env[envVar]);
+
+if (missingEnvVars.length > 0) {
+  console.error("❌ Missing required environment variables:");
+  missingEnvVars.forEach(envVar => console.error(`   - ${envVar}`));
+  console.error("Please check your .env file and ensure all variables are set.");
+  process.exit(1);
+}
+
+// Create connection pool with better error handling
+console.log({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  port: parseInt(process.env.DB_PORT) || 3306,
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
+  charset: "utf8mb4",
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true
+})
 const pool = mysql.createPool({
   host: process.env.DB_HOST,
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
   database: process.env.DB_NAME,
-  port: process.env.DB_PORT || 3306,
+  port: parseInt(process.env.DB_PORT) || 3306,
   waitForConnections: true,
   connectionLimit: 10,
   queueLimit: 0,
   charset: "utf8mb4",
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true
 });
 
-// Test database connection
-async function testConnection() {
-  try {
-    const connection = await pool.getConnection();
-    console.log("Database connection successful");
-    connection.release();
-    return true;
-  } catch (error) {
-    console.error("Database connection failed:", error);
-    return false;
+// Test database connection with retry logic
+async function testConnection(retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const connection = await pool.getConnection();
+      console.log("✅ Database connection successful");
+      connection.release();
+      return true;
+    } catch (error) {
+      console.error(`❌ Database connection attempt ${i + 1} failed:`, error.message);
+      if (i === retries - 1) {
+        console.error("💥 All database connection attempts failed. Please check your database configuration.");
+        return false;
+      }
+      // Wait before retrying (exponential backoff)
+      await new Promise(resolve => setTimeout(resolve, Math.pow(2, i) * 1000));
+    }
   }
+  return false;
 }
 
-// Initialize database tables if they don't exist
+// Initialize database tables with proper constraints
 async function initDatabase() {
   try {
-    // Set character encoding to help with key length issues
+    console.log("🔧 Initializing database tables...");
+    
+    // Set character encoding
     await pool.execute(`SET NAMES utf8mb4`);
 
-    console.log("Creating resources table...");
+    // Create action_types table first (referenced by resources)
+    console.log("📋 Creating action_types table...");
     await pool.execute(`
-        CREATE TABLE IF NOT EXISTS resources (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          name VARCHAR(255) NOT NULL,
-          value VARCHAR(100) NOT NULL,
-          action_type ENUM('mining', 'salvage', 'haul') NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          UNIQUE KEY resource_action (value(50), action_type)
-        )
-      `);
+      CREATE TABLE IF NOT EXISTS action_types (
+        id int NOT NULL AUTO_INCREMENT,
+        name varchar(50) NOT NULL,
+        display_name varchar(100) NOT NULL,
+        unit varchar(50) NOT NULL DEFAULT 'SCU',
+        emoji varchar(20) DEFAULT NULL,
+        created_at timestamp NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY unique_action_name (name)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
-    console.log("Creating targets table...");
+    // Insert default action types
     await pool.execute(`
-        CREATE TABLE IF NOT EXISTS targets (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          action VARCHAR(20) NOT NULL,
-          resource VARCHAR(100) NOT NULL,
-          target_amount INT NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          created_by VARCHAR(100) NOT NULL,
-          UNIQUE KEY target_key (action, resource(50))
-        )
-      `);
+      INSERT INTO action_types (name, display_name, unit, emoji)
+      VALUES 
+        ('mining', 'Mining', 'SCU', '⛏️'),
+        ('salvage', 'Salvage', 'SCU', '🏭'),
+        ('haul', 'Hauling', 'SCU', '🚚'),
+        ('earn', 'Earning', 'aUEC', '💰')
+      ON DUPLICATE KEY UPDATE 
+        display_name = VALUES(display_name),
+        unit = VALUES(unit),
+        emoji = VALUES(emoji);
+    `);
 
-    console.log("Creating contributions table...");
+    console.log("📦 Creating resources table...");
     await pool.execute(`
-        CREATE TABLE IF NOT EXISTS contributions (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          target_id INT NOT NULL,
-          user_id VARCHAR(100) NOT NULL,
-          username VARCHAR(100) NOT NULL,
-          amount INT NOT NULL,
-          location VARCHAR(255) NOT NULL,
-          timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          INDEX idx_target_id (target_id),
-          INDEX idx_user_id (user_id),
-          INDEX idx_timestamp (timestamp),
-          FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
-        )
-      `);
+      CREATE TABLE IF NOT EXISTS resources (
+        id int AUTO_INCREMENT PRIMARY KEY,
+        guild_id varchar(100) NOT NULL,
+        name varchar(255) NOT NULL,
+        value varchar(100) NOT NULL,
+        action_type enum('mining', 'salvage', 'haul') NOT NULL,
+        action_type_id int NOT NULL,
+        emoji varchar(20) DEFAULT NULL,
+        created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_guild_id (guild_id),
+        INDEX idx_action_type_id (action_type_id),
+        INDEX idx_resources_guild_type (guild_id, action_type_id),
+        UNIQUE KEY resource_guild_action (guild_id, value(50), action_type_id),
+        FOREIGN KEY (action_type_id) REFERENCES action_types(id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
-    console.log("Creating progress table...");
+    console.log("🎯 Creating targets table...");
     await pool.execute(`
-        CREATE TABLE IF NOT EXISTS progress (
-          target_id INT PRIMARY KEY,
-          current_amount INT NOT NULL DEFAULT 0,
-          last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-          FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
-        )
-      `);
+      CREATE TABLE IF NOT EXISTS targets (
+        id int AUTO_INCREMENT PRIMARY KEY,
+        guild_id varchar(100) NOT NULL,
+        action varchar(20) NOT NULL,
+        resource varchar(100) NOT NULL,
+        target_amount int NOT NULL,
+        created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+        created_by varchar(100) NOT NULL,
+        INDEX idx_guild_id (guild_id),
+        INDEX idx_targets_guild_action (guild_id, action),
+        UNIQUE KEY target_guild_key (guild_id, action, resource(50))
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
-    console.log("Creating settings table...");
+    console.log("📊 Creating contributions table...");
     await pool.execute(`
-        CREATE TABLE IF NOT EXISTS settings (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          setting_key VARCHAR(100) NOT NULL UNIQUE,
-          setting_value JSON NOT NULL,
-          last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
-        )
-      `);
+      CREATE TABLE IF NOT EXISTS contributions (
+        id int AUTO_INCREMENT PRIMARY KEY,
+        target_id int NOT NULL,
+        user_id varchar(100) NOT NULL,
+        username varchar(100) NOT NULL,
+        amount int NOT NULL,
+        location varchar(255) NOT NULL,
+        timestamp timestamp DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_target_id (target_id),
+        INDEX idx_user_id (user_id),
+        INDEX idx_timestamp (timestamp),
+        INDEX idx_contributions_guild (target_id),
+        FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
-    console.log("Creating dashboards table...");
+    console.log("📈 Creating progress table...");
     await pool.execute(`
-        CREATE TABLE IF NOT EXISTS dashboards (
-          id INT AUTO_INCREMENT PRIMARY KEY,
-          message_id VARCHAR(100) NOT NULL,
-          channel_id VARCHAR(100) NOT NULL,
-          guild_id VARCHAR(100) NOT NULL,
-          created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-          INDEX idx_message_id (message_id),
-          INDEX idx_channel_id (channel_id)
-        )
-      `);
+      CREATE TABLE IF NOT EXISTS progress (
+        target_id int PRIMARY KEY,
+        current_amount int NOT NULL DEFAULT 0,
+        last_updated timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (target_id) REFERENCES targets(id) ON DELETE CASCADE
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
 
-    console.log("Database tables initialized successfully");
+    console.log("⚙️ Creating settings table...");
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS settings (
+        id int AUTO_INCREMENT PRIMARY KEY,
+        guild_id varchar(100) NOT NULL,
+        setting_key varchar(100) NOT NULL,
+        setting_value JSON NOT NULL,
+        last_updated timestamp DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY setting_guild_key (setting_key, guild_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    console.log("📱 Creating dashboards table...");
+    await pool.execute(`
+      CREATE TABLE IF NOT EXISTS dashboards (
+        id int AUTO_INCREMENT PRIMARY KEY,
+        message_id varchar(100) NOT NULL,
+        channel_id varchar(100) NOT NULL,
+        guild_id varchar(100) NOT NULL,
+        source_guild_id varchar(100) DEFAULT NULL,
+        created_at timestamp DEFAULT CURRENT_TIMESTAMP,
+        INDEX idx_message_id (message_id),
+        INDEX idx_channel_id (channel_id),
+        INDEX idx_guild_id (guild_id)
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+    `);
+
+    console.log("✅ Database tables initialized successfully");
     return true;
   } catch (error) {
-    console.error("Error initializing database tables:", error);
-    throw error; // rethrow to make sure the startup process knows there was an error
+    console.error("💥 Error initializing database tables:", error);
+    throw error;
   }
 }
 
-// Default resources
+// Seed default resources with proper guild handling
 async function seedDefaultResources() {
   try {
-    // Check if resources table exists before counting
-    const [tableExists] = await pool.execute(
-      `SELECT COUNT(*) as count FROM information_schema.tables 
-       WHERE table_schema = ? AND table_name = 'resources'`,
-      [process.env.DB_NAME]
-    );
-
-    if (tableExists[0].count === 0) {
-      console.log("Resources table doesn't exist yet, skipping seeding");
+    // Check if we have any resources
+    const [rows] = await pool.execute("SELECT COUNT(*) as count FROM resources");
+    
+    if (rows[0].count > 0) {
+      console.log(`ℹ️ Found ${rows[0].count} existing resources, skipping seeding`);
       return;
     }
 
-    const [rows] = await pool.execute(
-      "SELECT COUNT(*) as count FROM resources"
-    );
+    console.log("🌱 Seeding default resources...");
+    
+    // Get action type IDs
+    const [actionTypes] = await pool.execute("SELECT id, name FROM action_types");
+    const actionTypeMap = new Map();
+    actionTypes.forEach(type => {
+      actionTypeMap.set(type.name, type.id);
+    });
 
-    if (rows[0].count === 0) {
+    // Default guild ID - you should update this to match your primary guild
+    const defaultGuildId = process.env.DEFAULT_GUILD_ID || '1260629720270245908';
+
+    // Default resources with action type mapping
+    const defaultResources = [
       // Mining resources
-      const miningResources = [
-        ["Copper", "copper", "mining"],
-        ["Iron", "iron", "mining"],
-        ["Gold", "gold", "mining"],
-        ["Diamond", "diamond", "mining"],
-        ["Quantainium", "quantainium", "mining"],
-        ["Titanium", "titanium", "mining"],
-        ["Aluminum", "aluminum", "mining"],
-      ];
-
+      { name: "Copper", value: "copper", action: "mining" },
+      { name: "Iron", value: "iron", action: "mining" },
+      { name: "Gold", value: "gold", action: "mining" },
+      { name: "Diamond", value: "diamond", action: "mining" },
+      { name: "Quantainium", value: "quantainium", action: "mining" },
+      { name: "Titanium", value: "titanium", action: "mining" },
+      { name: "Aluminum", value: "aluminum", action: "mining" },
+      
       // Salvage resources
-      const salvageResources = [
-        ["Recycled Material Composite", "rmc", "salvage"],
-        ["Construction Materials", "cm", "salvage"],
-        ["Scrap Metal", "scrap_metal", "salvage"],
-        ["Ship Parts", "ship_parts", "salvage"],
-      ];
-
+      { name: "Recycled Material Composite", value: "rmc", action: "salvage" },
+      { name: "Construction Materials", value: "cm", action: "salvage" },
+      { name: "Scrap Metal", value: "scrap_metal", action: "salvage" },
+      { name: "Ship Parts", value: "ship_parts", action: "salvage" },
+      
       // Haul resources
-      const haulResources = [
-        ["Iron", "iron", "haul"],
-        ["Copper", "copper", "haul"],
-        ["Medical Supplies", "medical_supplies", "haul"],
-        ["Agricultural Supplies", "agricultural_supplies", "haul"],
-        ["Titanium", "titanium", "haul"],
-        ["Hydrogen", "hydrogen", "haul"],
-        ["Chlorine", "chlorine", "haul"],
-      ];
+      { name: "Medical Supplies", value: "medical_supplies", action: "haul" },
+      { name: "Agricultural Supplies", value: "agricultural_supplies", action: "haul" },
+      { name: "Hydrogen", value: "hydrogen", action: "haul" },
+      { name: "Chlorine", value: "chlorine", action: "haul" }
+    ];
 
-      const allResources = [
-        ...miningResources,
-        ...salvageResources,
-        ...haulResources,
-      ];
-
-      console.log(`Seeding ${allResources.length} default resources...`);
-
-      for (const [name, value, action_type] of allResources) {
+    for (const resource of defaultResources) {
+      const actionTypeId = actionTypeMap.get(resource.action);
+      if (actionTypeId) {
         try {
           await pool.execute(
-            "INSERT IGNORE INTO resources (name, value, action_type) VALUES (?, ?, ?)",
-            [name, value, action_type]
+            "INSERT IGNORE INTO resources (guild_id, name, value, action_type, action_type_id) VALUES (?, ?, ?, ?, ?)",
+            [defaultGuildId, resource.name, resource.value, resource.action, actionTypeId]
           );
         } catch (err) {
-          console.error(`Error inserting resource ${name}:`, err);
+          console.warn(`⚠️ Could not insert resource ${resource.name}:`, err.message);
         }
       }
-
-      console.log("Default resources seeded successfully");
-    } else {
-      console.log(
-        `Found ${rows[0].count} existing resources, skipping seeding`
-      );
     }
+
+    console.log(`✅ Seeded ${defaultResources.length} default resources`);
   } catch (error) {
-    console.error("Error seeding default resources:", error);
+    console.error("💥 Error seeding default resources:", error);
   }
 }
 
-// Initialize all database components
+// Main setup function
 async function setupDatabase() {
   try {
+    console.log("🚀 Starting database setup...");
+    
     const connected = await testConnection();
-    if (connected) {
-      await initDatabase();
-      await seedDefaultResources();
-      return true;
+    if (!connected) {
+      return false;
     }
-    return false;
+    
+    await initDatabase();
+    await seedDefaultResources();
+    
+    console.log("🎉 Database setup completed successfully!");
+    return true;
   } catch (error) {
-    console.error("Database setup failed:", error);
+    console.error("💥 Database setup failed:", error);
     return false;
   }
 }
+
+// Graceful shutdown
+process.on('SIGINT', async () => {
+  console.log('🛑 Shutting down gracefully...');
+  await pool.end();
+  process.exit(0);
+});
 
 module.exports = {
   pool,
   setupDatabase,
   testConnection,
 };
+`
+-- Critical Database Fixes Migration
+-- Run this BEFORE deploying the bot
+
+-- Fix resources table constraints
+ALTER TABLE resources DROP INDEX IF EXISTS resource_action;
+ALTER TABLE resources ADD UNIQUE KEY resource_guild_action (guild_id, value(50), action_type_id);
+
+-- Fix targets table constraints  
+ALTER TABLE targets DROP INDEX IF EXISTS target_key;
+ALTER TABLE targets ADD UNIQUE KEY target_guild_key (guild_id, action, resource(50));
+
+-- Ensure all existing data has proper guild_id (update with your actual guild ID)
+UPDATE resources SET guild_id = '1260629720270245908' WHERE guild_id = '' OR guild_id IS NULL;
+UPDATE targets SET guild_id = '1260629720270245908' WHERE guild_id = '' OR guild_id IS NULL;
+UPDATE settings SET guild_id = '1260629720270245908' WHERE guild_id = '' OR guild_id IS NULL;
+
+-- Add indexes for better performance
+CREATE INDEX IF NOT EXISTS idx_contributions_guild ON contributions(target_id);
+CREATE INDEX IF NOT EXISTS idx_targets_guild_action ON targets(guild_id, action);
+CREATE INDEX IF NOT EXISTS idx_resources_guild_type ON resources(guild_id, action_type_id);
+`

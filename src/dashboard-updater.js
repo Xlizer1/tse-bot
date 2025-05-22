@@ -22,6 +22,7 @@ function getActionEmoji(actionName, actionEmoji = null) {
 
   const emojiMap = {
     mine: "⛏️",
+    mining: "⛏️",
     salvage: "🏭",
     haul: "🚚",
     earn: "💰",
@@ -98,14 +99,16 @@ async function generateDashboardInsights(guildId) {
             emoji: actionType.emoji,
             unit: actionType.unit,
             percentage: data.total > 0 ? Math.floor((data.current / data.total) * 100) : 0,
+            current: data.current,
+            total: data.total,
             progressBar: createProgressBar(
               data.total > 0 ? Math.floor((data.current / data.total) * 100) : 0
             ),
           };
         }
       ),
-      closestTarget: sortedTargets[0],
-      furthestTarget: sortedTargets[sortedTargets.length - 1],
+      closestTarget: sortedTargets[0] || null,
+      furthestTarget: sortedTargets[sortedTargets.length - 1] || null,
       topContributors,
     };
 
@@ -125,24 +128,26 @@ async function createProgressEmbed(guildId) {
 
   try {
     if (!guildId) {
-      embed.setDescription("Error: Guild ID is required to display dashboard data.");
+      embed.setDescription("❌ Error: Guild ID is required to display dashboard data.");
+      embed.setColor(0xff0000);
       return embed;
     }
     
     const insights = await generateDashboardInsights(guildId);
 
     if (!insights) {
-      embed.setDescription(
-        "Unable to generate dashboard insights at this time."
-      );
+      embed.setDescription("⚠️ Unable to generate dashboard insights at this time.");
+      embed.setColor(0xffaa00);
       return embed;
     }
 
     // Check if there's any data
     if (insights.totalTargets === 0) {
       embed.setDescription(
-        "No targets have been set for this server yet. Use `/settarget` to create targets!"
+        "📋 No targets have been set for this server yet.\n" +
+        "Use `/settarget` to create collection targets!"
       );
+      embed.setColor(0x888888);
       return embed;
     }
 
@@ -159,31 +164,27 @@ async function createProgressEmbed(guildId) {
     // Resource Breakdown
     if (insights.resourceBreakdown.length > 0) {
       const resourceBreakdownField = insights.resourceBreakdown
-        .map(
-          (rb) =>
-            `${getActionEmoji(rb.action, rb.emoji)} **${rb.displayName}**: ${
-              rb.progressBar
-            } ${rb.percentage}%`
-        )
+        .map((rb) => {
+          const emoji = getActionEmoji(rb.action, rb.emoji);
+          return `${emoji} **${rb.displayName}**: ${rb.progressBar} ${rb.percentage}% (${rb.current}/${rb.total} ${rb.unit})`;
+        })
         .join("\n");
 
       embed.addFields({
         name: "📈 Resource Type Breakdown",
-        value: resourceBreakdownField,
+        value: resourceBreakdownField.length > 1024 
+          ? resourceBreakdownField.substring(0, 1020) + "..." 
+          : resourceBreakdownField,
       });
     }
 
-    // Top Contributors (filter to only this guild's contributions)
+    // Top Contributors
     if (insights.topContributors && insights.topContributors.length > 0) {
-      // Note: We should filter contributors by guild, but for now showing global top contributors
-      // TODO: Update ContributionModel.getTopContributors to accept guildId parameter
       const topContributorsField = insights.topContributors
-        .map(
-          (contributor, index) =>
-            `${index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"} ${
-              contributor.username
-            }: ${contributor.total_amount} total contributions`
-        )
+        .map((contributor, index) => {
+          const medal = index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉";
+          return `${medal} ${contributor.username}: ${contributor.total_amount} total`;
+        })
         .join("\n");
 
       embed.addFields({
@@ -197,127 +198,154 @@ async function createProgressEmbed(guildId) {
       const closestTarget = insights.closestTarget;
       const furthestTarget = insights.furthestTarget;
 
-      // Get unit for each target
-      const closestUnit = closestTarget.unit || "SCU";
-      const furthestUnit = furthestTarget.unit || "SCU";
-
       const resourceName = (target) =>
         target.resource_name ||
         target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
 
-      const targetsInsight = [
-        `**🎉 Closest Target**: ${resourceName(closestTarget)} (${
-          closestTarget.percentage
-        }%)`,
-        `**🏃 Furthest Target**: ${resourceName(furthestTarget)} (${
-          furthestTarget.percentage
-        }%)`,
-      ].join("\n");
+      const targetsInsight = [];
+      
+      if (closestTarget.percentage >= 100) {
+        targetsInsight.push(`**🎉 Completed**: ${resourceName(closestTarget)} (100%)`);
+      } else {
+        targetsInsight.push(`**🎯 Closest Target**: ${resourceName(closestTarget)} (${closestTarget.percentage}%)`);
+      }
+      
+      if (furthestTarget.id !== closestTarget.id) {
+        targetsInsight.push(`**📈 Needs Attention**: ${resourceName(furthestTarget)} (${furthestTarget.percentage}%)`);
+      }
 
       embed.addFields({
-        name: "🎯 Target Insights",
-        value: targetsInsight,
+        name: "🎯 Target Status",
+        value: targetsInsight.join("\n"),
       });
     }
 
     return embed;
   } catch (error) {
     console.error("Error creating progress embed:", error);
-
-    embed.setDescription("An error occurred while loading dashboard data for this server.");
+    embed.setDescription("❌ An error occurred while loading dashboard data for this server.");
+    embed.setColor(0xff0000);
     return embed;
   }
 }
 
 // Update all dashboards when resource data changes
 async function updateDashboards(client) {
+  if (!client || !client.db) {
+    console.warn("⚠️ Client or database not available for dashboard updates");
+    return;
+  }
+
   try {
-    // Check if dashboards table exists
-    try {
-      // Get all dashboard records
-      const [rows] = await client.db.execute(`
-        SELECT d.*, 
-               IFNULL(d.source_guild_id, d.guild_id) AS data_guild_id 
-        FROM dashboards d
-      `);
+    // Get all dashboard records with better error handling
+    const [rows] = await client.db.execute(`
+      SELECT d.*, 
+             IFNULL(d.source_guild_id, d.guild_id) AS data_guild_id 
+      FROM dashboards d
+    `);
 
-      // Check if there are any dashboards
-      if (rows.length === 0) return;
+    if (rows.length === 0) {
+      return; // No dashboards to update
+    }
 
-      // Update each dashboard
-      const validDashboards = [];
+    console.log(`🔄 Updating ${rows.length} dashboards...`);
 
-      for (const dashboard of rows) {
-        const { guild_id, channel_id, message_id, data_guild_id } = dashboard;
+    // Update each dashboard with proper error handling and cleanup
+    let updatedCount = 0;
+    let cleanedCount = 0;
 
-        try {
-          // Get guild
-          const guild = client.guilds.cache.get(guild_id);
-          if (!guild) continue;
+    for (const dashboard of rows) {
+      const { id, guild_id, channel_id, message_id, data_guild_id } = dashboard;
 
-          // Get channel
-          const channel = guild.channels.cache.get(channel_id);
-          if (!channel) continue;
+      try {
+        // Get guild with timeout
+        const guild = await Promise.race([
+          client.guilds.fetch(guild_id),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Guild fetch timeout')), 5000)
+          )
+        ]);
 
-          // Get message
-          const message = await channel.messages
-            .fetch(message_id)
-            .catch(() => null);
-          if (!message) {
-            // Remove invalid dashboard
-            await client.db.execute(
-              "DELETE FROM dashboards WHERE message_id = ?",
-              [message_id]
-            );
-            continue;
-          }
+        if (!guild) {
+          console.log(`🗑️ Guild ${guild_id} not found, removing dashboard`);
+          await client.db.execute("DELETE FROM dashboards WHERE id = ?", [id]);
+          cleanedCount++;
+          continue;
+        }
 
-          // Create updated embed with guild-specific data
-          const updatedEmbed = await createProgressEmbed(data_guild_id);
+        // Get channel
+        const channel = guild.channels.cache.get(channel_id);
+        if (!channel) {
+          console.log(`🗑️ Channel ${channel_id} not found, removing dashboard`);
+          await client.db.execute("DELETE FROM dashboards WHERE id = ?", [id]);
+          cleanedCount++;
+          continue;
+        }
 
-          // Add source attribution for shared dashboards
-          if (data_guild_id !== guild_id) {
-            let sourceName = data_guild_id;
-            try {
-              const sourceGuild = await client.guilds.fetch(data_guild_id);
-              if (sourceGuild) {
-                sourceName = sourceGuild.name;
-              }
-            } catch (err) {
-              console.log(`Could not fetch guild info for ${data_guild_id}`);
+        // Get message with timeout
+        const message = await Promise.race([
+          channel.messages.fetch(message_id),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Message fetch timeout')), 5000)
+          )
+        ]).catch(() => null);
+
+        if (!message) {
+          console.log(`🗑️ Message ${message_id} not found, removing dashboard`);
+          await client.db.execute("DELETE FROM dashboards WHERE id = ?", [id]);
+          cleanedCount++;
+          continue;
+        }
+
+        // Create updated embed with guild-specific data
+        const updatedEmbed = await createProgressEmbed(data_guild_id);
+
+        // Add source attribution for shared dashboards
+        if (data_guild_id !== guild_id) {
+          let sourceName = data_guild_id;
+          try {
+            const sourceGuild = await client.guilds.fetch(data_guild_id);
+            if (sourceGuild) {
+              sourceName = sourceGuild.name;
             }
-
-            updatedEmbed.setFooter({
-              text: `Data from: ${sourceName} | ID: ${data_guild_id}`,
-              iconURL: guild.iconURL({ dynamic: true }),
-            });
+          } catch (err) {
+            console.log(`⚠️ Could not fetch source guild info for ${data_guild_id}`);
           }
 
-          // Update the message
-          await message.edit({ embeds: [updatedEmbed] });
+          updatedEmbed.setFooter({
+            text: `Data from: ${sourceName} | ID: ${data_guild_id}`,
+            iconURL: guild.iconURL({ dynamic: true }),
+          });
+        }
 
-          // This dashboard is valid, keep it
-          validDashboards.push(dashboard);
-        } catch (error) {
-          console.error(`Error updating dashboard ${message_id}:`, error);
-          // Remove problematic dashboard
-          await client.db.execute(
-            "DELETE FROM dashboards WHERE message_id = ?",
-            [message_id]
-          );
+        // Update the message with timeout
+        await Promise.race([
+          message.edit({ embeds: [updatedEmbed] }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Message edit timeout')), 10000)
+          )
+        ]);
+
+        updatedCount++;
+
+      } catch (error) {
+        console.error(`❌ Error updating dashboard ${message_id}:`, error.message);
+        
+        // If it's a permission or not found error, clean up the dashboard
+        if (error.code === 50013 || error.code === 10008 || error.code === 10003) {
+          console.log(`🗑️ Removing invalid dashboard ${message_id}`);
+          await client.db.execute("DELETE FROM dashboards WHERE id = ?", [id]);
+          cleanedCount++;
         }
       }
-    } catch (error) {
-      if (error.code === "ER_NO_SUCH_TABLE") {
-        console.log(
-          "Dashboards table not found. This will be created during database initialization."
-        );
-        return;
-      }
-      throw error;
     }
+
+    if (updatedCount > 0 || cleanedCount > 0) {
+      console.log(`✅ Dashboard update complete: ${updatedCount} updated, ${cleanedCount} cleaned up`);
+    }
+
   } catch (error) {
-    console.error("Error in updateDashboards:", error);
+    console.error("💥 Error in updateDashboards:", error);
   }
 }
 
@@ -334,48 +362,68 @@ async function handleRefreshDashboard(interaction) {
 
     if (!sourceGuildId) {
       return interaction.reply({
-        content: "Error: Could not determine guild context for refresh.",
+        content: "❌ Error: Could not determine guild context for refresh.",
         flags: MessageFlags.Ephemeral,
       });
     }
 
-    // Create updated embed with guild-specific data
-    const updatedEmbed = await createProgressEmbed(sourceGuildId);
+    // Defer the reply to prevent timeout
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
-    // Add source attribution for shared dashboards
-    if (sourceGuildId !== interaction.guild?.id) {
-      let sourceName = sourceGuildId;
-      try {
-        const sourceGuild = await interaction.client.guilds.fetch(
-          sourceGuildId
-        );
-        if (sourceGuild) {
-          sourceName = sourceGuild.name;
+    try {
+      // Create updated embed with guild-specific data
+      const updatedEmbed = await createProgressEmbed(sourceGuildId);
+
+      // Add source attribution for shared dashboards
+      if (sourceGuildId !== interaction.guild?.id) {
+        let sourceName = sourceGuildId;
+        try {
+          const sourceGuild = await interaction.client.guilds.fetch(sourceGuildId);
+          if (sourceGuild) {
+            sourceName = sourceGuild.name;
+          }
+        } catch (err) {
+          console.log(`⚠️ Could not fetch guild info for ${sourceGuildId}`);
         }
-      } catch (err) {
-        console.log(`Could not fetch guild info for ${sourceGuildId}`);
+
+        updatedEmbed.setFooter({
+          text: `Data from: ${sourceName} | ID: ${sourceGuildId}`,
+          iconURL: interaction.guild?.iconURL({ dynamic: true }),
+        });
       }
 
-      updatedEmbed.setFooter({
-        text: `Data from: ${sourceName} | ID: ${sourceGuildId}`,
-        iconURL: interaction.guild?.iconURL({ dynamic: true }),
+      // Update the message
+      await interaction.message.edit({ embeds: [updatedEmbed] });
+
+      // Acknowledge the interaction
+      await interaction.editReply({
+        content: "✅ Dashboard refreshed successfully!",
+      });
+
+    } catch (updateError) {
+      console.error("Error updating dashboard:", updateError);
+      await interaction.editReply({
+        content: "⚠️ Dashboard refreshed, but there was an issue updating the display.",
       });
     }
 
-    // Update the message
-    await interaction.message.edit({ embeds: [updatedEmbed] });
-
-    // Acknowledge the interaction
-    await interaction.reply({
-      content: "Dashboard refreshed!",
-      flags: MessageFlags.Ephemeral,
-    });
   } catch (error) {
     console.error("Error in handleRefreshDashboard:", error);
-    await interaction.reply({
-      content: "An error occurred while refreshing the dashboard.",
-      flags: MessageFlags.Ephemeral,
-    });
+    
+    try {
+      if (interaction.deferred) {
+        await interaction.editReply({
+          content: "❌ An error occurred while refreshing the dashboard.",
+        });
+      } else {
+        await interaction.reply({
+          content: "❌ An error occurred while refreshing the dashboard.",
+          flags: MessageFlags.Ephemeral,
+        });
+      }
+    } catch (replyError) {
+      console.error("Error sending error reply:", replyError);
+    }
   }
 }
 

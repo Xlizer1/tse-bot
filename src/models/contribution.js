@@ -16,8 +16,8 @@ class ContributionModel {
 
       // Update the progress
       await connection.execute(
-        "UPDATE progress SET current_amount = current_amount + ? WHERE target_id = ?",
-        [amount, targetId]
+        "INSERT INTO progress (target_id, current_amount) VALUES (?, ?) ON DUPLICATE KEY UPDATE current_amount = current_amount + ?",
+        [targetId, amount, amount]
       );
 
       await connection.commit();
@@ -31,31 +31,23 @@ class ContributionModel {
     }
   }
 
-  // Get contributions for a target
+  // Get contributions for a target with proper error handling
   static async getByTargetId(targetId, limit = 10) {
     try {
-      // Use prepared statement with explicit type casting
-      const [rows] = await pool.query(
+      // Validate inputs
+      if (!targetId || targetId <= 0) {
+        throw new Error("Invalid target ID provided");
+      }
+
+      const numericLimit = Math.max(1, Math.min(parseInt(limit) || 10, 1000));
+
+      const [rows] = await pool.execute(
         "SELECT * FROM contributions WHERE target_id = ? ORDER BY timestamp DESC LIMIT ?",
-        [targetId, limit]
+        [parseInt(targetId), numericLimit]
       );
       return rows;
     } catch (error) {
-      console.error(
-        `Error getting contributions for target ID ${targetId}:`,
-        error
-      );
-      console.error("Full error details:", error);
-
-      // Additional error diagnosis
-      console.error("Error Code:", error.code);
-      console.error("SQL State:", error.sqlState);
-      console.error("SQL Message:", error.sqlMessage);
-      console.error("Target ID:", targetId);
-      console.error("Limit:", limit);
-      console.error("Target ID Type:", typeof targetId);
-      console.error("Limit Type:", typeof limit);
-
+      console.error(`Error getting contributions for target ID ${targetId}:`, error);
       throw error;
     }
   }
@@ -63,62 +55,57 @@ class ContributionModel {
   // Get latest contribution for a target
   static async getLatestForTarget(targetId) {
     try {
-      const [rows] = await pool.query(
+      const [rows] = await pool.execute(
         "SELECT * FROM contributions WHERE target_id = ? ORDER BY timestamp DESC LIMIT 1",
         [targetId]
       );
       return rows[0] || null;
     } catch (error) {
-      console.error(
-        `Error getting latest contribution for target ID ${targetId}:`,
-        error
-      );
+      console.error(`Error getting latest contribution for target ID ${targetId}:`, error);
       throw error;
     }
   }
 
-  // Get contributions by user
-  static async getByUserId(userId, limit = 100) {
+  // Get contributions by user for a specific guild
+  static async getByUserId(userId, guildId, limit = 100) {
     try {
-      const [rows] = await pool.query(
-        "SELECT c.*, t.action, t.resource FROM contributions c JOIN targets t ON c.target_id = t.id WHERE c.user_id = ? ORDER BY c.timestamp DESC LIMIT ?",
-        [userId, limit]
+      if (!guildId) {
+        throw new Error("Guild ID is required for user contributions");
+      }
+
+      const [rows] = await pool.execute(
+        `SELECT c.*, t.action, t.resource 
+         FROM contributions c 
+         JOIN targets t ON c.target_id = t.id 
+         WHERE c.user_id = ? AND t.guild_id = ? 
+         ORDER BY c.timestamp DESC 
+         LIMIT ?`,
+        [userId, guildId, parseInt(limit) || 100]
       );
       return rows;
     } catch (error) {
-      console.error(
-        `Error getting contributions for user ID ${userId}:`,
-        error
-      );
+      console.error(`Error getting contributions for user ID ${userId} in guild ${guildId}:`, error);
       throw error;
     }
   }
 
-  // Get top contributors overall or for a specific guild
+  // Get top contributors for a specific guild (FIXED - was leaking data between guilds)
   static async getTopContributors(limit = 10, guildId = null) {
     try {
-      let query = `
-        SELECT c.user_id, c.username, SUM(c.amount) as total_amount
-        FROM contributions c
-      `;
+      if (!guildId) {
+        throw new Error("Guild ID is required for top contributors");
+      }
 
-      let params = [];
-
-      query += `
-          JOIN targets t ON c.target_id = t.id
-          WHERE t.guild_id = ?
-        `;
-      params.push(guildId);
-
-      query += `
-        GROUP BY c.user_id, c.username
-        ORDER BY total_amount DESC
-        LIMIT ?
-      `;
-
-      params.push(limit);
-
-      const [rows] = await pool.query(query, params);
+      const [rows] = await pool.execute(
+        `SELECT c.user_id, c.username, SUM(c.amount) as total_amount
+         FROM contributions c
+         JOIN targets t ON c.target_id = t.id
+         WHERE t.guild_id = ?
+         GROUP BY c.user_id, c.username
+         ORDER BY total_amount DESC
+         LIMIT ?`,
+        [guildId, parseInt(limit) || 10]
+      );
       return rows;
     } catch (error) {
       console.error("Error getting top contributors:", error);
@@ -129,27 +116,20 @@ class ContributionModel {
   // Get top contributors by action type for a specific guild
   static async getTopContributorsByAction(action, limit = 10, guildId = null) {
     try {
-      let query = `
-        SELECT c.user_id, c.username, SUM(c.amount) as total_amount
-        FROM contributions c
-        JOIN targets t ON c.target_id = t.id
-        WHERE t.action = ?
-      `;
+      if (!guildId) {
+        throw new Error("Guild ID is required for action-based contributors");
+      }
 
-      let params = [action];
-
-      query += ` AND t.guild_id = ?`;
-      params.push(guildId);
-
-      query += `
-        GROUP BY c.user_id, c.username
-        ORDER BY total_amount DESC
-        LIMIT ?
-      `;
-
-      params.push(limit);
-
-      const [rows] = await pool.query(query, params);
+      const [rows] = await pool.execute(
+        `SELECT c.user_id, c.username, SUM(c.amount) as total_amount
+         FROM contributions c
+         JOIN targets t ON c.target_id = t.id
+         WHERE t.action = ? AND t.guild_id = ?
+         GROUP BY c.user_id, c.username
+         ORDER BY total_amount DESC
+         LIMIT ?`,
+        [action, guildId, parseInt(limit) || 10]
+      );
       return rows;
     } catch (error) {
       console.error(`Error getting top contributors for ${action}:`, error);
@@ -160,48 +140,41 @@ class ContributionModel {
   // Get contributions by location for a specific guild
   static async getByLocation(location, limit = 100, guildId = null) {
     try {
-      let query = `
-        SELECT c.*, t.action, t.resource 
-        FROM contributions c 
-        JOIN targets t ON c.target_id = t.id 
-        WHERE c.location LIKE ?
-      `;
+      if (!guildId) {
+        throw new Error("Guild ID is required for location-based contributions");
+      }
 
-      let params = [`%${location}%`];
-
-      query += ` AND t.guild_id = ?`;
-      params.push(guildId);
-
-      query += ` ORDER BY c.timestamp DESC LIMIT ?`;
-      params.push(limit);
-
-      const [rows] = await pool.query(query, params);
+      const [rows] = await pool.execute(
+        `SELECT c.*, t.action, t.resource 
+         FROM contributions c 
+         JOIN targets t ON c.target_id = t.id 
+         WHERE c.location LIKE ? AND t.guild_id = ?
+         ORDER BY c.timestamp DESC 
+         LIMIT ?`,
+        [`%${location}%`, guildId, parseInt(limit) || 100]
+      );
       return rows;
     } catch (error) {
-      console.error(
-        `Error getting contributions for location ${location}:`,
-        error
-      );
+      console.error(`Error getting contributions for location ${location}:`, error);
       throw error;
     }
   }
 
   // Get contributions with date filtering for a specific guild
-  static async getWithDateFilter(
-    fromDate,
-    toDate,
-    limit = 100,
-    guildId = null
-  ) {
+  static async getWithDateFilter(fromDate, toDate, limit = 100, guildId = null) {
     try {
+      if (!guildId) {
+        throw new Error("Guild ID is required for date-filtered contributions");
+      }
+
       let query = `
         SELECT c.*, t.action, t.resource 
         FROM contributions c 
         JOIN targets t ON c.target_id = t.id 
-        WHERE 1=1
+        WHERE t.guild_id = ?
       `;
 
-      const params = [];
+      const params = [guildId];
 
       if (fromDate) {
         query += " AND c.timestamp >= ?";
@@ -213,13 +186,10 @@ class ContributionModel {
         params.push(toDate);
       }
 
-      query += " AND t.guild_id = ?";
-      params.push(guildId);
-
       query += " ORDER BY c.timestamp DESC LIMIT ?";
-      params.push(limit);
+      params.push(parseInt(limit) || 100);
 
-      const [rows] = await pool.query(query, params);
+      const [rows] = await pool.execute(query, params);
       return rows;
     } catch (error) {
       console.error("Error getting contributions with date filter:", error);
@@ -230,23 +200,19 @@ class ContributionModel {
   // Get all locations with resource types for a specific guild
   static async getAllLocations(guildId = null) {
     try {
-      let query = `
-        SELECT DISTINCT c.location, t.action, t.resource, SUM(c.amount) as total_amount
-        FROM contributions c
-        JOIN targets t ON c.target_id = t.id
-      `;
+      if (!guildId) {
+        throw new Error("Guild ID is required for locations");
+      }
 
-      let params = [];
-
-      query += ` WHERE t.guild_id = ?`;
-      params.push(guildId);
-
-      query += `
-        GROUP BY c.location, t.action, t.resource
-        ORDER BY c.location
-      `;
-
-      const [rows] = await pool.query(query, params);
+      const [rows] = await pool.execute(
+        `SELECT DISTINCT c.location, t.action, t.resource, SUM(c.amount) as total_amount
+         FROM contributions c
+         JOIN targets t ON c.target_id = t.id
+         WHERE t.guild_id = ?
+         GROUP BY c.location, t.action, t.resource
+         ORDER BY c.location`,
+        [guildId]
+      );
       return rows;
     } catch (error) {
       console.error("Error getting all locations:", error);
@@ -257,16 +223,18 @@ class ContributionModel {
   // Get contributions for targets in a specific guild
   static async getForGuild(guildId, limit = 100) {
     try {
-      const [rows] = await pool.query(
-        `
-        SELECT c.*, t.action, t.resource, t.guild_id
-        FROM contributions c
-        JOIN targets t ON c.target_id = t.id
-        WHERE t.guild_id = ?
-        ORDER BY c.timestamp DESC
-        LIMIT ?
-      `,
-        [guildId, limit]
+      if (!guildId) {
+        throw new Error("Guild ID is required");
+      }
+
+      const [rows] = await pool.execute(
+        `SELECT c.*, t.action, t.resource, t.guild_id
+         FROM contributions c
+         JOIN targets t ON c.target_id = t.id
+         WHERE t.guild_id = ?
+         ORDER BY c.timestamp DESC
+         LIMIT ?`,
+        [guildId, parseInt(limit) || 100]
       );
 
       return rows;
@@ -279,30 +247,104 @@ class ContributionModel {
   // Get contribution statistics for a guild
   static async getGuildStats(guildId) {
     try {
-      const [stats] = await pool.query(
-        `
-        SELECT 
-          COUNT(*) as total_contributions,
-          SUM(c.amount) as total_amount,
-          COUNT(DISTINCT c.user_id) as unique_contributors,
-          AVG(c.amount) as average_contribution
-        FROM contributions c
-        JOIN targets t ON c.target_id = t.id
-        WHERE t.guild_id = ?
-      `,
+      if (!guildId) {
+        throw new Error("Guild ID is required for guild stats");
+      }
+
+      const [stats] = await pool.execute(
+        `SELECT 
+           COUNT(*) as total_contributions,
+           COALESCE(SUM(c.amount), 0) as total_amount,
+           COUNT(DISTINCT c.user_id) as unique_contributors,
+           COALESCE(AVG(c.amount), 0) as average_contribution
+         FROM contributions c
+         JOIN targets t ON c.target_id = t.id
+         WHERE t.guild_id = ?`,
         [guildId]
       );
 
-      return (
-        stats[0] || {
-          total_contributions: 0,
-          total_amount: 0,
-          unique_contributors: 0,
-          average_contribution: 0,
-        }
-      );
+      return stats[0] || {
+        total_contributions: 0,
+        total_amount: 0,
+        unique_contributors: 0,
+        average_contribution: 0,
+      };
     } catch (error) {
       console.error(`Error getting guild stats for ${guildId}:`, error);
+      throw error;
+    }
+  }
+
+  // Get recent activity for a guild (for dashboards)
+  static async getRecentActivity(guildId, limit = 5) {
+    try {
+      if (!guildId) {
+        throw new Error("Guild ID is required for recent activity");
+      }
+
+      const [rows] = await pool.execute(
+        `SELECT c.*, t.action, t.resource, t.guild_id,
+                r.name as resource_name,
+                at.display_name as action_display_name,
+                at.unit
+         FROM contributions c
+         JOIN targets t ON c.target_id = t.id
+         LEFT JOIN resources r ON t.resource = r.value AND t.guild_id = r.guild_id AND r.action_type = t.action
+         LEFT JOIN action_types at ON at.name = t.action
+         WHERE t.guild_id = ?
+         ORDER BY c.timestamp DESC
+         LIMIT ?`,
+        [guildId, parseInt(limit) || 5]
+      );
+
+      return rows;
+    } catch (error) {
+      console.error(`Error getting recent activity for guild ${guildId}:`, error);
+      throw error;
+    }
+  }
+
+  // Delete contributions for a target (used when targets are deleted)
+  static async deleteByTargetId(targetId) {
+    try {
+      const [result] = await pool.execute(
+        "DELETE FROM contributions WHERE target_id = ?",
+        [targetId]
+      );
+      return result.affectedRows;
+    } catch (error) {
+      console.error(`Error deleting contributions for target ${targetId}:`, error);
+      throw error;
+    }
+  }
+
+  // Get contribution summary by action type for a guild
+  static async getActionTypeSummary(guildId) {
+    try {
+      if (!guildId) {
+        throw new Error("Guild ID is required for action type summary");
+      }
+
+      const [rows] = await pool.execute(
+        `SELECT t.action, 
+                at.display_name as action_display_name,
+                at.emoji as action_emoji,
+                at.unit,
+                COUNT(c.id) as contribution_count,
+                COALESCE(SUM(c.amount), 0) as total_amount,
+                COUNT(DISTINCT c.user_id) as unique_contributors
+         FROM targets t
+         LEFT JOIN contributions c ON t.id = c.target_id
+         LEFT JOIN action_types at ON at.name = t.action
+         WHERE t.guild_id = ?
+         GROUP BY t.action, at.display_name, at.emoji, at.unit
+         ORDER BY total_amount DESC`,
+        [guildId]
+      );
+
+      return rows;
+    } catch (error) {
+      console.error(`Error getting action type summary for guild ${guildId}:`, error);
       throw error;
     }
   }

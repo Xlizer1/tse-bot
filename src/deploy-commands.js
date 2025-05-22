@@ -2,183 +2,118 @@ const fs = require("fs");
 const path = require("path");
 const { REST } = require("@discordjs/rest");
 const { Routes } = require("discord-api-types/v9");
-const ResourceModel = require("./models/resource");
 const { setupDatabase } = require("./database");
 require("dotenv").config();
+
+// Validate environment variables
+const requiredVars = ['TOKEN', 'CLIENT_ID'];
+const missingVars = requiredVars.filter(varName => !process.env[varName]);
+
+if (missingVars.length > 0) {
+  console.error("❌ Missing required environment variables:");
+  missingVars.forEach(varName => console.error(`   - ${varName}`));
+  process.exit(1);
+}
 
 // Initialize database and deploy commands
 async function deployCommands() {
   try {
-    console.log("Setting up database connection...");
+    console.log("🔧 Setting up database connection...");
+    
     // Initialize database
     const dbInitialized = await setupDatabase();
-
     if (!dbInitialized) {
-      console.error(
-        "Failed to initialize database. Please check your database connection."
-      );
+      console.error("💥 Failed to initialize database. Please check your database connection.");
       process.exit(1);
     }
 
-    console.log("Database initialized successfully.");
+    console.log("✅ Database initialized successfully.");
 
     const commands = [];
     const commandFiles = fs
       .readdirSync(path.join(__dirname, "commands"))
       .filter((file) => file.endsWith(".js"));
 
+    console.log(`📁 Found ${commandFiles.length} command files`);
+
     for (const file of commandFiles) {
-      const command = require(`./commands/${file}`);
-
-      // Special handling for commands that need dynamic choices
-      if (
-        file === "report.js" ||
-        file === "addresources.js" ||
-        file === "quicklog.js"
-      ) {
-        // Create a deep copy of the command data
-        const commandData = JSON.parse(JSON.stringify(command.data.toJSON()));
-
-        // Find the resource option
-        const resourceOption = commandData.options.find(
-          (option) => option.name === "resource"
-        );
-
-        if (resourceOption) {
-          // Find the action option
-          const actionOption = commandData.options.find(
-            (option) => option.name === "action"
-          );
-
-          if (actionOption && actionOption.choices) {
-            // For each action, add the corresponding resources in separate commands
-            for (const actionChoice of actionOption.choices) {
-              const actionValue = actionChoice.value;
-              const actionType =
-                actionValue === "mine"
-                  ? "mining"
-                  : actionValue === "salvage"
-                  ? "salvage"
-                  : "haul";
-              // Get resources for this action type from database
-              const resources = await ResourceModel.getByActionType(
-                actionType
-              );
-              const resourceChoices = resources.map((r) => ({
-                name: r.name,
-                value: r.value,
-              }));
-
-              // Add choices to the resource option
-              resourceOption.choices = resourceChoices;
-
-              // Create a variant command name - ensure it's lowercase and valid
-              // Discord command names must be between 1-32 characters, lowercase, and contain only alphanumeric or underscore
-              // Fix: Ensure the variant name is within Discord's limits and properly formatted
-              const variantName =
-                `${commandData.name}-${actionValue}`.toLowerCase();
-
-              if (variantName.length > 32) {
-                console.warn(
-                  `Warning: Command name "${variantName}" exceeds 32 characters and will be truncated.`
-                );
-              }
-
-              // Create a separate command variant for this action
-              const variantCommand = {
-                ...commandData,
-                name: variantName.substring(0, 32), // Ensure name is not too long
-                options: [
-                  {
-                    ...resourceOption,
-                    choices: resourceChoices,
-                  },
-                  ...commandData.options.filter(
-                    (opt) => opt.name !== "action" && opt.name !== "resource"
-                  ),
-                ],
-              };
-
-              commands.push(variantCommand);
-            }
-          }
+      try {
+        const command = require(`./commands/${file}`);
+        
+        if (!command.data) {
+          console.warn(`⚠️ Command file ${file} is missing 'data' property, skipping`);
+          continue;
         }
-      } else if (file === "settarget.js") {
-        // For settarget, we need to handle it differently since it's admin-only
-        const commandData = JSON.parse(JSON.stringify(command.data.toJSON()));
 
-        // Find the resource option
-        const resourceOption = commandData.options.find(
-          (option) => option.name === "resource"
-        );
-
-        if (resourceOption) {
-          // Add choices for each action
-          const actionOption = commandData.options.find(
-            (option) => option.name === "action"
-          );
-
-          if (actionOption && actionOption.choices) {
-            for (const actionChoice of actionOption.choices) {
-              const actionValue = actionChoice.value;
-              const actionType =
-                actionValue === "mine"
-                  ? "mining"
-                  : actionValue === "salvage"
-                  ? "salvage"
-                  : "haul";
-
-              // Get resources for this action type from database
-              const resources = await ResourceModel.getByActionType(
-                actionType
-              );
-              const resourceChoices = resources.map((r) => ({
-                name: r.name,
-                value: r.value,
-              }));
-
-              if (actionValue === "mine") {
-                commandData.options.find((o) => o.name === "resource").choices =
-                  resourceChoices;
-              } else if (actionValue === "salvage") {
-                commandData.options.find((o) => o.name === "resource").choices =
-                  resourceChoices;
-              } else if (actionValue === "haul") {
-                commandData.options.find((o) => o.name === "resource").choices =
-                  resourceChoices;
-              }
-            }
-          }
+        // Convert command data to JSON
+        const commandData = command.data.toJSON();
+        
+        // Validate command name
+        if (!commandData.name || commandData.name.length > 32) {
+          console.warn(`⚠️ Command ${file} has invalid name, skipping`);
+          continue;
         }
 
         commands.push(commandData);
-      } else {
-        // Regular command, just add it
-        commands.push(command.data.toJSON());
+        console.log(`✅ Loaded command: ${commandData.name}`);
+        
+      } catch (error) {
+        console.error(`❌ Error loading command ${file}:`, error.message);
       }
     }
 
-    // Debug output to check command names
-    console.log("Command names being deployed:");
-    commands.forEach((cmd, index) => {
-      console.log(`${index}. ${cmd.name}`);
-    });
+    // Validate we have commands to deploy
+    if (commands.length === 0) {
+      console.error("💥 No valid commands found to deploy!");
+      process.exit(1);
+    }
+
+    console.log(`🚀 Deploying ${commands.length} commands...`);
 
     const rest = new REST({ version: "9" }).setToken(process.env.TOKEN);
 
-    console.log("Started refreshing application (/) commands.");
-
+    // Deploy commands globally
     await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {
       body: commands,
     });
 
-    console.log("Successfully reloaded application (/) commands.");
-    process.exit(0); // Exit cleanly after deployment
+    console.log("🎉 Successfully deployed application commands!");
+    
+    // Log deployed commands
+    console.log("\n📋 Deployed commands:");
+    commands.forEach((cmd, index) => {
+      console.log(`${index + 1}. /${cmd.name} - ${cmd.description}`);
+    });
+    
+    console.log(`\n✨ Total: ${commands.length} commands deployed`);
+    process.exit(0);
+    
   } catch (error) {
-    console.error("Error deploying commands:", error);
+    console.error("💥 Error deploying commands:", error);
+    
+    if (error.code === 50035) {
+      console.error("🔍 This is likely a validation error. Check your command definitions.");
+    } else if (error.code === 401) {
+      console.error("🔑 Invalid bot token. Please check your TOKEN environment variable.");
+    } else if (error.code === 403) {
+      console.error("🚫 Missing permissions. Make sure your bot has the required permissions.");
+    }
+    
     process.exit(1);
   }
 }
 
+// Graceful error handling
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('💥 Unhandled Rejection at:', promise, 'reason:', reason);
+  process.exit(1);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('💥 Uncaught Exception:', error);
+  process.exit(1);
+});
+
 // Start the deployment process
+console.log("🎯 Starting command deployment...");
 deployCommands();
