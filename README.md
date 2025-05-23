@@ -1,4 +1,4 @@
-# 🚀 TSE Bot - Terra Star Expeditionary Resource Tracker
+# TSE Bot - Terra Star Expeditionary Resource Tracker
 
 A comprehensive Discord bot for tracking resource collection across mining, salvage, hauling, and earning operations in Star Citizen.
 
@@ -7,7 +7,7 @@ A comprehensive Discord bot for tracking resource collection across mining, salv
 ![Discord.js](https://img.shields.io/badge/discord.js-v14-blue.svg)
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 
-## 📋 Table of Contents
+## Table of Contents
 
 - [Features](#-features)
 - [Quick Start](#-quick-start)
@@ -20,20 +20,20 @@ A comprehensive Discord bot for tracking resource collection across mining, salv
 - [Troubleshooting](#-troubleshooting)
 - [Contributing](#-contributing)
 
-## ✨ Features
+## Features
 
-- 📊 **Real-time Progress Tracking** - Live dashboards with automatic updates
-- 🎯 **Flexible Target Management** - Set goals for any resource with custom units
-- 🏆 **Comprehensive Leaderboards** - Track top contributors with detailed statistics
-- 🌍 **Location Analytics** - See where resources are being delivered
-- 📱 **Interactive Dashboards** - User-friendly interfaces with buttons and menus
-- 📈 **Automated Reporting** - Daily/scheduled progress reports
-- 📊 **Excel Export** - Professional reports with charts and formatting
-- 🌐 **Multi-Guild Support** - Each Discord server has isolated data
-- 🔗 **Shared Dashboards** - Display data from other servers for alliances
-- ⚡ **High Performance** - Optimized database queries and caching
+- **Real-time Progress Tracking** - Live dashboards with automatic updates
+- **Flexible Target Management** - Set goals for any resource with custom units
+- **Comprehensive Leaderboards** - Track top contributors with detailed statistics
+- **Location Analytics** - See where resources are being delivered
+- **Interactive Dashboards** - User-friendly interfaces with buttons and menus
+- **Automated Reporting** - Daily/scheduled progress reports
+- **Excel Export** - Professional reports with charts and formatting
+- **Multi-Guild Support** - Each Discord server has isolated data
+- **Shared Dashboards** - Display data from other servers for alliances
+- **High Performance** - Optimized database queries and caching
 
-## 🚀 Quick Start
+## Quick Start
 
 ### For Users
 1. Find a dashboard with "Add Resources" button
@@ -47,7 +47,7 @@ A comprehensive Discord bot for tracking resource collection across mining, salv
 3. Create targets via "Target Management"
 4. Create a live dashboard with `/livedashboard`
 
-## 🛠️ Installation
+## Installation
 
 ### Prerequisites
 - Node.js 16.0.0 or higher
@@ -114,7 +114,7 @@ npm run dev
 node src/index.js
 ```
 
-## 👥 User Guide
+## User Guide
 
 ### Logging Resources
 
@@ -148,7 +148,7 @@ node src/index.js
 /location resource:rmc                       # Specific resource locations
 ```
 
-## 👑 Admin Guide
+## Admin Guide
 
 ### Admin Dashboard
 Primary admin interface:
@@ -230,7 +230,7 @@ Via admin dashboard → "System Stats":
 - Monitor active dashboards
 - Check system performance metrics
 
-## 📖 Command Reference
+## Command Reference
 
 ### User Commands
 | Command | Description | Example |
@@ -254,7 +254,7 @@ Via admin dashboard → "System Stats":
 | `/autoreport` | Configure auto reports | `/autoreport enable channel:#reports time:09:00` |
 | `/reset` | Reset data (dangerous!) | `/reset target action:mining resource:copper` |
 
-## 🗄️ Database Setup
+## Database Setup
 
 ### Database Schema
 The bot uses MySQL with the following main tables:
@@ -272,7 +272,7 @@ Located in `src/scripts/`:
 - `complete-database-migration.js` - Fallback migration
 - `test-multi-guild.js` - Verify multi-guild functionality
 
-## ⚙️ Configuration
+## Configuration
 
 ### Environment Variables
 ```env
@@ -301,7 +301,7 @@ Bot requires these permissions:
 ### Admin Requirements
 Users need Discord "Administrator" permission to access admin commands.
 
-## 🐛 Troubleshooting
+## Troubleshooting
 
 ### Common Issues
 
@@ -362,18 +362,18 @@ Users need Discord "Administrator" permission to access admin commands.
 - Check admin and user permissions
 - Test error handling scenarios
 
-## 📄 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-## 🆘 Support
+## Support
 
 - **Documentation**: Check this README and inline code comments
 - **Issues**: Create GitHub issue with detailed description
 - **Discord**: Join our support server [link]
 - **Email**: support@example.com
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Discord.js community for excellent documentation
 - Star Citizen community for testing and feedback
