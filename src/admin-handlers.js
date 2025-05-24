@@ -51,6 +51,44 @@ async function handleAdminButtonInteraction(interaction) {
     case "admin_back":
       await handleBackButton(interaction);
       break;
+    // NEW: Action Types Management
+    case "admin_actiontypes":
+      await handleActionTypesButton(interaction);
+      break;
+    case "admin_add_actiontype":
+      await handleAddActionTypeButton(interaction);
+      break;
+    case "admin_edit_actiontype":
+      await handleEditActionTypeButton(interaction);
+      break;
+    case "admin_delete_actiontype":
+      await handleDeleteActionTypeButton(interaction);
+      break;
+
+    // NEW: Tag Management
+    case "admin_managetags":
+      await handleManageTagsButton(interaction);
+      break;
+    case "admin_add_tags":
+      await handleAddTagsButton(interaction);
+      break;
+    case "admin_remove_tags":
+      await handleRemoveTagsButton(interaction);
+      break;
+    case "admin_view_tags":
+      await handleViewTagsButton(interaction);
+      break;
+
+    // NEW: Shared Dashboard Management
+    case "admin_sharedashboard":
+      await handleSharedDashboardButton(interaction);
+      break;
+    case "admin_create_shared":
+      await handleCreateSharedButton(interaction);
+      break;
+    case "admin_list_servers":
+      await handleListServersButton(interaction);
+      break;
     case "admin_add_resource":
       await handleAddResourceButton(interaction);
       break;
@@ -75,32 +113,515 @@ async function handleAdminButtonInteraction(interaction) {
   }
 }
 
-const getResourceEmoji = (resourceName) => {
-  const lowercaseName = resourceName.toLowerCase();
-  const emojiMap = {
-    // Mining emojis
-    copper: "🟤",
-    iron: "⚙️",
-    gold: "✨",
-    diamond: "💎",
-    titanium: "🔧",
-    aluminum: "🛠️",
+async function handleAddActionTypeButton(interaction) {
+  const modal = new ModalBuilder()
+    .setCustomId("admin_add_actiontype_modal")
+    .setTitle("Add New Action Type");
 
-    // Salvage emojis
-    rmc: "♻️",
-    "construction materials": "🏗️",
-    "scrap metal": "🔩",
-    "ship parts": "🚀",
+  const nameInput = new TextInputBuilder()
+    .setCustomId("actiontype_name")
+    .setLabel("System Name")
+    .setPlaceholder("e.g., trading (lowercase, no spaces)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
 
-    // Haul emojis
-    "medical supplies": "🩺",
-    "agricultural supplies": "🌾",
-    hydrogen: "🧪",
-    chlorine: "🧪",
-  };
+  const displayNameInput = new TextInputBuilder()
+    .setCustomId("actiontype_display_name")
+    .setLabel("Display Name")
+    .setPlaceholder("e.g., Trading Operations")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
 
-  return emojiMap[lowercaseName] || "📦";
-};
+  const unitInput = new TextInputBuilder()
+    .setCustomId("actiontype_unit")
+    .setLabel("Unit of Measurement")
+    .setPlaceholder("e.g., aUEC, SCU, Units")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  const emojiInput = new TextInputBuilder()
+    .setCustomId("actiontype_emoji")
+    .setLabel("Emoji (optional)")
+    .setPlaceholder("e.g., 💱")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(nameInput),
+    new ActionRowBuilder().addComponents(displayNameInput),
+    new ActionRowBuilder().addComponents(unitInput),
+    new ActionRowBuilder().addComponents(emojiInput)
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function handleEditActionTypeButton(interaction) {
+  try {
+    const actionTypes = await ActionTypeModel.getAll();
+
+    if (actionTypes.length === 0) {
+      return interaction.update({
+        content: "No action types available to edit.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_edit_actiontype_select")
+        .setPlaceholder("Select action type to edit")
+        .addOptions(
+          actionTypes.map((type) => ({
+            label: `${type.display_name} (${type.name})`,
+            value: type.id.toString(),
+            description: `Unit: ${type.unit}`,
+            emoji: type.emoji || undefined,
+          }))
+        )
+    );
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_actiontypes")
+        .setLabel("Back to Action Types")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      content: "Select the action type you want to edit:",
+      embeds: [],
+      components: [selectMenu, backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleEditActionTypeButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading action types for editing.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleDeleteActionTypeButton(interaction) {
+  try {
+    const actionTypes = await ActionTypeModel.getAll();
+
+    if (actionTypes.length === 0) {
+      return interaction.update({
+        content: "No action types available to delete.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_delete_actiontype_select")
+        .setPlaceholder("Select action type to delete")
+        .addOptions(
+          actionTypes.map((type) => ({
+            label: `${type.display_name} (${type.name})`,
+            value: type.id.toString(),
+            description: `Unit: ${type.unit} - ⚠️ Permanent deletion`,
+            emoji: type.emoji || undefined,
+          }))
+        )
+    );
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_actiontypes")
+        .setLabel("Back to Action Types")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      content:
+        "⚠️ **Warning**: Deleting an action type will fail if it's being used by resources or targets.\n\nSelect the action type you want to delete:",
+      embeds: [],
+      components: [selectMenu, backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleDeleteActionTypeButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading action types for deletion.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleAddTagsButton(interaction) {
+  try {
+    const guildId = interaction.guild.id;
+    const targets = await TargetModel.getAllWithProgress(guildId);
+
+    if (targets.length === 0) {
+      return interaction.update({
+        content: "No targets available to add tags to.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_add_tags_target_select")
+        .setPlaceholder("Select target to add tags to")
+        .addOptions(
+          targets.slice(0, 25).map((target) => {
+            const resourceName = target.resource_name || target.resource;
+            const actionName =
+              target.action.charAt(0).toUpperCase() + target.action.slice(1);
+            let currentTags = target.tags || [];
+            if (typeof currentTags === "string") {
+              currentTags = JSON.parse(currentTags);
+            }
+
+            return {
+              label: `${actionName} ${resourceName}`,
+              value: target.id.toString(),
+              description:
+                currentTags.length > 0
+                  ? `Current tags: ${currentTags.join(", ")}`
+                  : "No tags currently",
+            };
+          })
+        )
+    );
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_managetags")
+        .setLabel("Back to Tag Management")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      content: "Select the target you want to add tags to:",
+      embeds: [],
+      components: [selectMenu, backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleAddTagsButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading targets for tag addition.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleRemoveTagsButton(interaction) {
+  try {
+    const guildId = interaction.guild.id;
+    const targets = await TargetModel.getAllWithProgress(guildId);
+
+    // Filter to only targets with tags
+    const taggedTargets = targets.filter((target) => {
+      let tags = target.tags || [];
+      if (typeof tags === "string") {
+        tags = JSON.parse(tags);
+      }
+      return tags && tags.length > 0;
+    });
+
+    if (taggedTargets.length === 0) {
+      return interaction.update({
+        content: "No targets have tags to remove.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_remove_tags_target_select")
+        .setPlaceholder("Select target to remove tags from")
+        .addOptions(
+          taggedTargets.slice(0, 25).map((target) => {
+            const resourceName = target.resource_name || target.resource;
+            const actionName =
+              target.action.charAt(0).toUpperCase() + target.action.slice(1);
+            let currentTags = target.tags || [];
+            if (typeof currentTags === "string") {
+              currentTags = JSON.parse(currentTags);
+            }
+
+            return {
+              label: `${actionName} ${resourceName}`,
+              value: target.id.toString(),
+              description: `Current tags: ${currentTags.join(", ")}`,
+            };
+          })
+        )
+    );
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_managetags")
+        .setLabel("Back to Tag Management")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      content: "Select the target you want to remove tags from:",
+      embeds: [],
+      components: [selectMenu, backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleRemoveTagsButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading targets for tag removal.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleViewTagsButton(interaction) {
+  try {
+    const guildId = interaction.guild.id;
+    const allTags = await TargetModel.getAllTags(guildId);
+
+    if (allTags.length === 0) {
+      return interaction.update({
+        content: "No tags available to view targets for.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId("admin_view_tags_select")
+        .setPlaceholder("Select tag to view targets")
+        .addOptions(
+          allTags.slice(0, 25).map((tag) => ({
+            label: tag,
+            value: tag,
+            description: `View all targets with the "${tag}" tag`,
+          }))
+        )
+    );
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_managetags")
+        .setLabel("Back to Tag Management")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      content: "Select a tag to view all targets with that tag:",
+      embeds: [],
+      components: [selectMenu, backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleViewTagsButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading tags for viewing.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+// NEW: Shared Dashboard Button Handlers
+async function handleCreateSharedButton(interaction) {
+  const modal = new ModalBuilder()
+    .setCustomId("admin_create_shared_modal")
+    .setTitle("Create Shared Dashboard");
+
+  const serverIdInput = new TextInputBuilder()
+    .setCustomId("shared_server_id")
+    .setLabel("Source Server ID")
+    .setPlaceholder("Enter the Discord server ID to share data from")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true);
+
+  const channelIdInput = new TextInputBuilder()
+    .setCustomId("shared_channel_id")
+    .setLabel("Channel ID (Optional)")
+    .setPlaceholder(
+      "Leave empty to post in the current channel)"
+    )
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+
+  const filterInput = new TextInputBuilder()
+    .setCustomId("shared_filter")
+    .setLabel("Tag Filter (Optional)")
+    .setPlaceholder("e.g., idris,critical (comma-separated)")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+
+  const titleInput = new TextInputBuilder()
+    .setCustomId("shared_title")
+    .setLabel("Custom Title (Optional)")
+    .setPlaceholder("e.g., Alliance Idris Progress")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(false);
+
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(serverIdInput),
+    new ActionRowBuilder().addComponents(channelIdInput),
+    new ActionRowBuilder().addComponents(filterInput),
+    new ActionRowBuilder().addComponents(titleInput)
+  );
+
+  await interaction.showModal(modal);
+}
+
+async function handleListServersButton(interaction) {
+  try {
+    // Get all servers with targets
+    const [servers] = await interaction.client.db.execute(
+      "SELECT guild_id, COUNT(*) as target_count FROM targets GROUP BY guild_id ORDER BY target_count DESC"
+    );
+
+    if (servers.length === 0) {
+      return interaction.update({
+        content: "No servers have any targets defined yet.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_sharedashboard")
+              .setLabel("Back to Shared Dashboards")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("📋 Available Servers for Dashboard Sharing")
+      .setDescription(
+        "These servers have resource collection data that can be shared"
+      )
+      .setTimestamp();
+
+    // Add server information
+    const serverList = await Promise.all(
+      servers.map(async (server) => {
+        const serverId = server.guild_id;
+
+        let serverName = "Unknown Server";
+        let serverIcon = null;
+        try {
+          const guild = await interaction.client.guilds.fetch(serverId);
+          if (guild) {
+            serverName = guild.name;
+            serverIcon = guild.iconURL({ dynamic: true });
+          }
+        } catch (err) {
+          // Guild not accessible
+        }
+
+        return {
+          name: serverName,
+          value: `**Server ID**: \`${serverId}\`\n**Targets**: ${server.target_count}`,
+          inline: true,
+        };
+      })
+    );
+
+    // Add up to 10 servers to avoid embed limits
+    embed.addFields(serverList.slice(0, 10));
+
+    if (servers.length > 10) {
+      embed.setFooter({ text: `Showing 10 of ${servers.length} servers` });
+    }
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_sharedashboard")
+        .setLabel("Back to Shared Dashboards")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      embeds: [embed],
+      components: [backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleListServersButton:", error);
+    await interaction.update({
+      content: "An error occurred while loading server list.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_sharedashboard")
+            .setLabel("Back to Shared Dashboards")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
 
 // Resource Management Button Handler
 async function handleResourcesButton(interaction) {
@@ -1092,7 +1613,7 @@ async function handleStatsButton(interaction) {
   }
 }
 
-// Back button handler
+// ENHANCED: Update main admin dashboard to include new buttons
 async function handleBackButton(interaction) {
   // Create dashboard embed
   const dashboardEmbed = new EmbedBuilder()
@@ -1111,6 +1632,21 @@ async function handleBackButton(interaction) {
           "Set collection targets or reset progress for specific resources.",
       },
       {
+        name: "Action Types Management", // NEW
+        value:
+          "Create, update, or delete action types (mining, salvage, etc.).",
+      },
+      {
+        name: "Tag Management", // NEW
+        value:
+          "Manage tags on targets for dashboard organization and filtering.",
+      },
+      {
+        name: "Shared Dashboards", // NEW
+        value:
+          "Create dashboards that display data from other Discord servers.",
+      },
+      {
         name: "Data Export",
         value: "Export resource collection data as an Excel spreadsheet.",
       },
@@ -1126,7 +1662,7 @@ async function handleBackButton(interaction) {
     .setFooter({ text: "Terra Star Expeditionary Admin Dashboard" })
     .setTimestamp();
 
-  // Create button rows
+  // Create button rows - ENHANCED with new buttons
   const row1 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("admin_resources")
@@ -1135,13 +1671,29 @@ async function handleBackButton(interaction) {
     new ButtonBuilder()
       .setCustomId("admin_targets")
       .setLabel("Target Management")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("admin_actiontypes") // NEW
+      .setLabel("Action Types")
       .setStyle(ButtonStyle.Primary)
   );
+
   const row2 = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId("admin_managetags") // NEW
+      .setLabel("Tag Management")
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId("admin_sharedashboard") // NEW
+      .setLabel("Shared Dashboards")
+      .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId("admin_export")
       .setLabel("Export Data")
-      .setStyle(ButtonStyle.Success),
+      .setStyle(ButtonStyle.Success)
+  );
+
+  const row3 = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId("admin_display")
       .setLabel("Display Controls")
@@ -1155,8 +1707,321 @@ async function handleBackButton(interaction) {
   // Send the dashboard
   await interaction.update({
     embeds: [dashboardEmbed],
-    components: [row1, row2],
+    components: [row1, row2, row3],
   });
+}
+
+// NEW: Action Types Management Handler
+async function handleActionTypesButton(interaction) {
+  try {
+    const actionTypes = await ActionTypeModel.getAll();
+
+    const actionTypesEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("🔧 Action Types Management")
+      .setDescription(
+        "Manage the types of actions users can log (mining, salvage, etc.)"
+      )
+      .setTimestamp();
+
+    if (actionTypes.length === 0) {
+      actionTypesEmbed.addFields({
+        name: "No Action Types",
+        value: "No action types have been defined yet.",
+      });
+    } else {
+      // Add current action types
+      const actionTypesList = actionTypes
+        .map((type) => {
+          return (
+            `${type.emoji || "📦"} **${type.display_name}**\n` +
+            `System Name: \`${type.name}\`\n` +
+            `Unit: ${type.unit}`
+          );
+        })
+        .join("\n\n");
+
+      actionTypesEmbed.addFields({
+        name: `Current Action Types (${actionTypes.length})`,
+        value:
+          actionTypesList.length > 1024
+            ? actionTypesList.substring(0, 1020) + "..."
+            : actionTypesList,
+      });
+    }
+
+    // Create button row
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_add_actiontype")
+        .setLabel("Add Action Type")
+        .setStyle(ButtonStyle.Success)
+        .setEmoji("➕"),
+      new ButtonBuilder()
+        .setCustomId("admin_edit_actiontype")
+        .setLabel("Edit Action Type")
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji("✏️"),
+      new ButtonBuilder()
+        .setCustomId("admin_delete_actiontype")
+        .setLabel("Delete Action Type")
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji("🗑️"),
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji("🔙")
+    );
+
+    await interaction.update({
+      embeds: [actionTypesEmbed],
+      components: [row],
+    });
+  } catch (error) {
+    console.error("Error in handleActionTypesButton:", error);
+    await interaction.update({
+      content:
+        "An error occurred while loading action types. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+// NEW: Tag Management Handler
+async function handleManageTagsButton(interaction) {
+  try {
+    const guildId = interaction.guild.id;
+    const allTags = await TargetModel.getAllTags(guildId);
+    const targets = await TargetModel.getAllWithProgress(guildId);
+
+    const tagsEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("🏷️ Tag Management")
+      .setDescription(
+        "Manage tags on targets for dashboard organization and filtering"
+      )
+      .setTimestamp();
+
+    if (allTags.length === 0) {
+      tagsEmbed.addFields({
+        name: "No Tags Found",
+        value: "No tags are currently in use on any targets.",
+      });
+    } else {
+      // Show tag usage statistics
+      const tagUsage = new Map();
+      targets.forEach((target) => {
+        let targetTags = target.tags || [];
+        if (typeof targetTags === "string") {
+          targetTags = JSON.parse(targetTags);
+        }
+        targetTags.forEach((tag) => {
+          tagUsage.set(tag, (tagUsage.get(tag) || 0) + 1);
+        });
+      });
+
+      const tagList = allTags
+        .map((tag) => {
+          const usage = tagUsage.get(tag) || 0;
+          return `\`${tag}\` (${usage} target${usage !== 1 ? "s" : ""})`;
+        })
+        .join(", ");
+
+      tagsEmbed.addFields(
+        {
+          name: `Available Tags (${allTags.length})`,
+          value:
+            tagList.length > 1024
+              ? tagList.substring(0, 1020) + "..."
+              : tagList,
+        },
+        {
+          name: "Statistics",
+          value: `**Total Targets**: ${targets.length}\n**Tagged Targets**: ${
+            targets.filter((t) => t.tags && t.tags.length > 0).length
+          }`,
+        }
+      );
+    }
+
+    // Create button row
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_add_tags")
+        .setLabel("Add Tags to Target")
+        .setStyle(ButtonStyle.Success)
+        .setEmoji("🏷️"),
+      new ButtonBuilder()
+        .setCustomId("admin_remove_tags")
+        .setLabel("Remove Tags from Target")
+        .setStyle(ButtonStyle.Danger)
+        .setEmoji("🚫"),
+      new ButtonBuilder()
+        .setCustomId("admin_view_tags")
+        .setLabel("View Targets by Tag")
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji("👁️"),
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji("🔙")
+    );
+
+    await interaction.update({
+      embeds: [tagsEmbed],
+      components: [row],
+    });
+  } catch (error) {
+    console.error("Error in handleManageTagsButton:", error);
+    await interaction.update({
+      content:
+        "An error occurred while loading tag management. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+// NEW: Shared Dashboard Handler
+async function handleSharedDashboardButton(interaction) {
+  try {
+    const guildId = interaction.guild.id;
+
+    // Get shared dashboards for this guild
+    const [sharedDashboards] = await interaction.client.db.execute(
+      "SELECT * FROM dashboards WHERE guild_id = ? AND source_guild_id IS NOT NULL",
+      [guildId]
+    );
+
+    // Get available servers with data
+    const [availableServers] = await interaction.client.db.execute(
+      "SELECT DISTINCT guild_id, COUNT(*) as target_count FROM targets GROUP BY guild_id"
+    );
+
+    const sharedEmbed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle("🔗 Shared Dashboard Management")
+      .setDescription(
+        "Create dashboards that display resource data from other Discord servers"
+      )
+      .setTimestamp();
+
+    // Show current shared dashboards
+    if (sharedDashboards.length === 0) {
+      sharedEmbed.addFields({
+        name: "Current Shared Dashboards",
+        value: "No shared dashboards are currently active.",
+      });
+    } else {
+      const dashboardList = await Promise.all(
+        sharedDashboards.map(async (dashboard) => {
+          let sourceName = dashboard.source_guild_id;
+          try {
+            const guild = await interaction.client.guilds.fetch(
+              dashboard.source_guild_id
+            );
+            if (guild) sourceName = guild.name;
+          } catch (e) {
+            // Guild name not available
+          }
+
+          return `<#${dashboard.channel_id}> - Data from **${sourceName}**`;
+        })
+      );
+
+      sharedEmbed.addFields({
+        name: `Current Shared Dashboards (${sharedDashboards.length})`,
+        value: dashboardList.join("\n"),
+      });
+    }
+
+    // Show available servers
+    if (availableServers.length > 1) {
+      const serverList = await Promise.all(
+        availableServers.slice(0, 5).map(async (server) => {
+          if (server.guild_id === guildId) return null; // Skip own server
+
+          let serverName = server.guild_id;
+          try {
+            const guild = await interaction.client.guilds.fetch(
+              server.guild_id
+            );
+            if (guild) serverName = guild.name;
+          } catch (e) {
+            // Guild name not available
+          }
+
+          return `**${serverName}** (${server.target_count} targets)`;
+        })
+      );
+
+      const filteredList = serverList.filter((item) => item !== null);
+      if (filteredList.length > 0) {
+        sharedEmbed.addFields({
+          name: "Available Servers",
+          value:
+            filteredList.join("\n") +
+            (availableServers.length > 6 ? "\n*...and more*" : ""),
+        });
+      }
+    }
+
+    // Create button row
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_create_shared")
+        .setLabel("Create Shared Dashboard")
+        .setStyle(ButtonStyle.Success)
+        .setEmoji("➕"),
+      new ButtonBuilder()
+        .setCustomId("admin_list_servers")
+        .setLabel("List Available Servers")
+        .setStyle(ButtonStyle.Primary)
+        .setEmoji("📋"),
+      new ButtonBuilder()
+        .setCustomId("admin_back")
+        .setLabel("Back to Admin")
+        .setStyle(ButtonStyle.Secondary)
+        .setEmoji("🔙")
+    );
+
+    await interaction.update({
+      embeds: [sharedEmbed],
+      components: [row],
+    });
+  } catch (error) {
+    console.error("Error in handleSharedDashboardButton:", error);
+    await interaction.update({
+      content:
+        "An error occurred while loading shared dashboard management. Please try again.",
+      embeds: [],
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
 }
 
 // Helper function to safely handle emoji values for Discord.js
@@ -1564,6 +2429,7 @@ async function handleAdminSelectMenuInteraction(interaction) {
   const selectedValue = interaction.values[0];
 
   switch (menuId) {
+    // Existing cases...
     case "admin_resource_action":
       await handleResourceActionSelect(interaction, selectedValue);
       break;
@@ -1585,6 +2451,813 @@ async function handleAdminSelectMenuInteraction(interaction) {
     case "admin_add_target_resource":
       await handleAddTargetResourceSelect(interaction, selectedValue);
       break;
+
+    // NEW: Action Type Select Menus
+    case "admin_edit_actiontype_select":
+      await handleEditActionTypeSelect(interaction, selectedValue);
+      break;
+    case "admin_delete_actiontype_select":
+      await handleDeleteActionTypeSelect(interaction, selectedValue);
+      break;
+
+    // NEW: Tag Management Select Menus
+    case "admin_add_tags_target_select":
+      await handleAddTagsTargetSelect(interaction, selectedValue);
+      break;
+    case "admin_remove_tags_target_select":
+      await handleRemoveTagsTargetSelect(interaction, selectedValue);
+      break;
+    case "admin_remove_tags_tag_select":
+      await handleRemoveTagsTagSelect(interaction, selectedValue);
+      break;
+    case "admin_view_tags_select":
+      await handleViewTagsSelect(interaction, selectedValue);
+      break;
+  }
+}
+
+// Action Type Select Handlers
+async function handleEditActionTypeSelect(interaction, actionTypeId) {
+  try {
+    const actionType = await ActionTypeModel.getById(actionTypeId);
+
+    if (!actionType) {
+      return interaction.update({
+        content: "Action type not found.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(`admin_edit_actiontype_modal_${actionTypeId}`)
+      .setTitle(`Edit Action Type: ${actionType.display_name}`);
+
+    const displayNameInput = new TextInputBuilder()
+      .setCustomId("actiontype_display_name")
+      .setLabel("Display Name")
+      .setValue(actionType.display_name)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const unitInput = new TextInputBuilder()
+      .setCustomId("actiontype_unit")
+      .setLabel("Unit of Measurement")
+      .setValue(actionType.unit)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const emojiInput = new TextInputBuilder()
+      .setCustomId("actiontype_emoji")
+      .setLabel("Emoji (optional)")
+      .setValue(actionType.emoji || "")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(displayNameInput),
+      new ActionRowBuilder().addComponents(unitInput),
+      new ActionRowBuilder().addComponents(emojiInput)
+    );
+
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Error in handleEditActionTypeSelect:", error);
+    await interaction.update({
+      content: "An error occurred while loading action type for editing.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleDeleteActionTypeSelect(interaction, actionTypeId) {
+  try {
+    const actionType = await ActionTypeModel.getById(actionTypeId);
+
+    if (!actionType) {
+      return interaction.update({
+        content: "Action type not found.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Try to delete the action type
+    try {
+      await ActionTypeModel.delete(actionTypeId);
+
+      await interaction.update({
+        content: `✅ Successfully deleted action type: **${actionType.display_name}** (\`${actionType.name}\`)`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Primary),
+            new ButtonBuilder()
+              .setCustomId("admin_back")
+              .setLabel("Back to Admin")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    } catch (deleteError) {
+      await interaction.update({
+        content: `❌ Cannot delete action type "${actionType.display_name}": ${deleteError.message}`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+  } catch (error) {
+    console.error("Error in handleDeleteActionTypeSelect:", error);
+    await interaction.update({
+      content: "An error occurred while deleting action type.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleAddTagsTargetSelect(interaction, targetId) {
+  try {
+    const target = await TargetModel.getById(targetId);
+
+    if (!target) {
+      return interaction.update({
+        content: "Target not found.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const resourceName = target.resource_name || target.resource;
+    const actionName =
+      target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+    let currentTags = target.tags || [];
+    if (typeof currentTags === "string") {
+      currentTags = JSON.parse(currentTags);
+    }
+
+    const modal = new ModalBuilder()
+      .setCustomId(`admin_add_tags_modal_${targetId}`)
+      .setTitle(`Add Tags: ${actionName} ${resourceName}`);
+
+    const tagsInput = new TextInputBuilder()
+      .setCustomId("target_tags")
+      .setLabel("Tags to Add")
+      .setPlaceholder("e.g., idris,critical,event (comma-separated)")
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    const currentTagsDisplay = new TextInputBuilder()
+      .setCustomId("current_tags_display")
+      .setLabel("Current Tags (read-only)")
+      .setValue(
+        currentTags.length > 0 ? currentTags.join(", ") : "No current tags"
+      )
+      .setStyle(TextInputStyle.Short)
+      .setRequired(false);
+
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(currentTagsDisplay),
+      new ActionRowBuilder().addComponents(tagsInput)
+    );
+
+    await interaction.showModal(modal);
+  } catch (error) {
+    console.error("Error in handleAddTagsTargetSelect:", error);
+    await interaction.update({
+      content: "An error occurred while loading target for tag addition.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleRemoveTagsTargetSelect(interaction, targetId) {
+  try {
+    const target = await TargetModel.getById(targetId);
+
+    if (!target) {
+      return interaction.update({
+        content: "Target not found.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    let currentTags = target.tags || [];
+    if (typeof currentTags === "string") {
+      currentTags = JSON.parse(currentTags);
+    }
+
+    if (currentTags.length === 0) {
+      return interaction.update({
+        content: "This target has no tags to remove.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const resourceName = target.resource_name || target.resource;
+    const actionName =
+      target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+    const selectMenu = new ActionRowBuilder().addComponents(
+      new StringSelectMenuBuilder()
+        .setCustomId(`admin_remove_tags_tag_select_${targetId}`)
+        .setPlaceholder("Select tags to remove")
+        .setMaxValues(currentTags.length)
+        .addOptions(
+          currentTags.map((tag) => ({
+            label: tag,
+            value: tag,
+            description: `Remove "${tag}" tag`,
+          }))
+        )
+    );
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_managetags")
+        .setLabel("Back to Tag Management")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      content: `Select tags to remove from **${actionName} ${resourceName}**:`,
+      embeds: [],
+      components: [selectMenu, backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleRemoveTagsTargetSelect:", error);
+    await interaction.update({
+      content: "An error occurred while loading target tags for removal.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleRemoveTagsTagSelect(interaction, selectedTags) {
+  try {
+    // Extract target ID from custom ID
+    const targetId = interaction.customId.split("_").pop();
+    const target = await TargetModel.getById(targetId);
+
+    if (!target) {
+      return interaction.update({
+        content: "Target not found.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    let currentTags = target.tags || [];
+    if (typeof currentTags === "string") {
+      currentTags = JSON.parse(currentTags);
+    }
+
+    // Remove selected tags
+    const selectedTagList = interaction.values;
+    const newTags = currentTags.filter((tag) => !selectedTagList.includes(tag));
+
+    // Update target tags
+    await TargetModel.updateTags(targetId, newTags);
+
+    // Update dashboards
+    await updateDashboards(interaction.client);
+
+    const resourceName = target.resource_name || target.resource;
+    const actionName =
+      target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+    await interaction.update({
+      content:
+        `✅ Successfully removed tags from **${actionName} ${resourceName}**:\n` +
+        `**Removed**: ${selectedTagList.join(", ")}\n` +
+        `**Remaining**: ${newTags.length > 0 ? newTags.join(", ") : "No tags"}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error in handleRemoveTagsTagSelect:", error);
+    await interaction.update({
+      content: "An error occurred while removing tags.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleViewTagsSelect(interaction, selectedTag) {
+  try {
+    const guildId = interaction.guild.id;
+    const targets = await TargetModel.getAllWithProgress(guildId, [
+      selectedTag,
+    ]);
+
+    if (targets.length === 0) {
+      return interaction.update({
+        content: `No targets found with tag: "${selectedTag}"`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor(0x0099ff)
+      .setTitle(`🏷️ Targets with tag: "${selectedTag}"`)
+      .setDescription(`Found ${targets.length} targets`)
+      .setTimestamp();
+
+    // Group by action type
+    const grouped = {};
+    targets.forEach((target) => {
+      if (!grouped[target.action]) grouped[target.action] = [];
+      grouped[target.action].push(target);
+    });
+
+    Object.entries(grouped).forEach(([action, actionTargets]) => {
+      const fieldValue = actionTargets
+        .map((target) => {
+          const resourceName = target.resource_name || target.resource;
+          const current = target.current_amount || 0;
+          const percentage = Math.floor((current / target.target_amount) * 100);
+          let targetTags = target.tags || [];
+          if (typeof targetTags === "string") {
+            targetTags = JSON.parse(targetTags);
+          }
+
+          return `• **${resourceName}**: ${current}/${target.target_amount} ${
+            target.unit || "SCU"
+          } (${percentage}%)\n  Tags: ${targetTags.join(", ")}`;
+        })
+        .join("\n");
+
+      embed.addFields({
+        name: `${action.charAt(0).toUpperCase() + action.slice(1)} Targets`,
+        value: fieldValue || "None",
+        inline: false,
+      });
+    });
+
+    const backButton = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("admin_managetags")
+        .setLabel("Back to Tag Management")
+        .setStyle(ButtonStyle.Secondary)
+    );
+
+    await interaction.update({
+      embeds: [embed],
+      components: [backButton],
+    });
+  } catch (error) {
+    console.error("Error in handleViewTagsSelect:", error);
+    await interaction.update({
+      content: "An error occurred while viewing targets with this tag.",
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleEditActionTypeModalSubmit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const actionTypeId = interaction.customId.replace(
+      "admin_edit_actiontype_modal_",
+      ""
+    );
+
+    const displayName = interaction.fields.getTextInputValue(
+      "actiontype_display_name"
+    );
+    const unit = interaction.fields.getTextInputValue("actiontype_unit");
+    const emoji =
+      interaction.fields.getTextInputValue("actiontype_emoji") || null;
+
+    const actionType = await ActionTypeModel.getById(actionTypeId);
+    if (!actionType) {
+      return interaction.editReply({
+        content: "Action type not found.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Update the action type
+    const updateData = {
+      name: actionType.name, // Keep the same system name
+      display_name: displayName,
+      unit: unit,
+      emoji: emoji,
+    };
+
+    await ActionTypeModel.update(actionTypeId, updateData);
+
+    await interaction.editReply({
+      content: `✅ Successfully updated action type: **${displayName}** (\`${actionType.name}\`) with unit: **${unit}**`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error updating action type:", error);
+    await interaction.editReply({
+      content: `❌ Error updating action type: ${error.message}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleAddTagsModalSubmit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const targetId = interaction.customId.replace("admin_add_tags_modal_", "");
+    const tagsInput = interaction.fields.getTextInputValue("target_tags");
+
+    // Parse tags
+    const newTags = tagsInput
+      .split(",")
+      .map((tag) => tag.trim())
+      .filter((tag) => tag.length > 0);
+
+    if (newTags.length === 0) {
+      return interaction.editReply({
+        content: "No valid tags provided.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Get the target
+    const target = await TargetModel.getById(targetId);
+    if (!target) {
+      return interaction.editReply({
+        content: "Target not found.",
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_managetags")
+              .setLabel("Back to Tag Management")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Get current tags
+    let currentTags = target.tags || [];
+    if (typeof currentTags === "string") {
+      currentTags = JSON.parse(currentTags);
+    }
+
+    // Add new tags (avoid duplicates)
+    const combinedTags = [...new Set([...currentTags, ...newTags])];
+
+    // Update the target
+    await TargetModel.updateTags(targetId, combinedTags);
+
+    // Update dashboards
+    await updateDashboards(interaction.client);
+
+    const resourceName = target.resource_name || target.resource;
+    const actionName =
+      target.action.charAt(0).toUpperCase() + target.action.slice(1);
+
+    await interaction.editReply({
+      content:
+        `✅ Successfully added tags to **${actionName} ${resourceName}**:\n` +
+        `**Added**: ${newTags.join(", ")}\n` +
+        `**All tags**: ${combinedTags.join(", ")}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error adding tags:", error);
+    await interaction.editReply({
+      content: `❌ Error adding tags: ${error.message}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_managetags")
+            .setLabel("Back to Tag Management")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
+async function handleCreateSharedModalSubmit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const sourceGuildId =
+      interaction.fields.getTextInputValue("shared_server_id");
+    const channelIdInput =
+      interaction.fields.getTextInputValue("shared_channel_id");
+    const filterInput = interaction.fields.getTextInputValue("shared_filter");
+    const customTitle = interaction.fields.getTextInputValue("shared_title");
+
+    // Get target channel
+    let targetChannel;
+    if (channelIdInput) {
+      try {
+        targetChannel = await interaction.client.channels.fetch(channelIdInput);
+      } catch (error) {
+        return interaction.editReply({
+          content: `❌ Could not find channel with ID: ${channelIdInput}`,
+          components: [
+            new ActionRowBuilder().addComponents(
+              new ButtonBuilder()
+                .setCustomId("admin_sharedashboard")
+                .setLabel("Back to Shared Dashboards")
+                .setStyle(ButtonStyle.Secondary)
+            ),
+          ],
+        });
+      }
+    } else {
+      targetChannel = interaction.channel;
+    }
+
+    // Parse filter tags
+    let targetTags = null;
+    if (filterInput) {
+      targetTags = filterInput
+        .split(",")
+        .map((tag) => tag.trim())
+        .filter((tag) => tag.length > 0);
+    }
+
+    // Verify source guild has data
+    const [targets] = await interaction.client.db.execute(
+      "SELECT COUNT(*) as count FROM targets WHERE guild_id = ?",
+      [sourceGuildId]
+    );
+
+    if (!targets[0] || targets[0].count === 0) {
+      return interaction.editReply({
+        content: `❌ The server with ID ${sourceGuildId} doesn't have any targets defined.`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_sharedashboard")
+              .setLabel("Back to Shared Dashboards")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Create dashboard configuration
+    const dashboardConfig = {
+      guildId: sourceGuildId,
+      targetTags: targetTags,
+      title:
+        customTitle ||
+        (targetTags ? `📊 ${targetTags.join(" & ")} Dashboard` : null) ||
+        "🚀 Shared Resource Dashboard",
+      showAllIfNoFilter: !targetTags,
+    };
+
+    // Create progress embed
+    const { createProgressEmbed } = require("../dashboard-updater");
+    const progressEmbed = await createProgressEmbed(dashboardConfig);
+
+    // Add source attribution
+    let sourceName = sourceGuildId;
+    try {
+      const guild = await interaction.client.guilds.fetch(sourceGuildId);
+      if (guild) {
+        sourceName = guild.name;
+      }
+    } catch (err) {
+      console.log(`Could not fetch guild info for ${sourceGuildId}`);
+    }
+
+    let footerText = `Data from: ${sourceName} | ID: ${sourceGuildId}`;
+    if (targetTags && targetTags.length > 0) {
+      footerText += ` | Filter: ${targetTags.join(", ")}`;
+    }
+
+    progressEmbed.setFooter({
+      text: footerText,
+      iconURL: interaction.guild.iconURL({ dynamic: true }),
+    });
+
+    // Create buttons
+    const actionRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId(`view_leaderboard_${sourceGuildId}`)
+        .setLabel("Leaderboard")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`view_progress_${sourceGuildId}`)
+        .setLabel("Progress Details")
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId(`refresh_dashboard_${sourceGuildId}`)
+        .setLabel("Refresh")
+        .setStyle(ButtonStyle.Success)
+    );
+
+    // Send the dashboard
+    const message = await targetChannel.send({
+      embeds: [progressEmbed],
+      components: [actionRow],
+    });
+
+    // Store dashboard in database
+    await interaction.client.db.execute(
+      "INSERT INTO dashboards (message_id, channel_id, guild_id, source_guild_id, config) VALUES (?, ?, ?, ?, ?)",
+      [
+        message.id,
+        targetChannel.id,
+        interaction.guild.id,
+        sourceGuildId,
+        JSON.stringify(dashboardConfig),
+      ]
+    );
+
+    // Create confirmation message
+    let confirmationMessage = `✅ Shared dashboard created in ${targetChannel}!\n**Data Source**: ${sourceName}`;
+
+    if (targetTags && targetTags.length > 0) {
+      confirmationMessage += `\n**Filter**: ${targetTags.join(", ")}`;
+    }
+
+    if (customTitle) {
+      confirmationMessage += `\n**Title**: "${customTitle}"`;
+    }
+
+    await interaction.editReply({
+      content: confirmationMessage,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_sharedashboard")
+            .setLabel("Back to Shared Dashboards")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error creating shared dashboard:", error);
+    await interaction.editReply({
+      content: `❌ Error creating shared dashboard: ${error.message}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_sharedashboard")
+            .setLabel("Back to Shared Dashboards")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
   }
 }
 
@@ -2061,6 +3734,72 @@ async function handleAddTargetResourceSelect(interaction, combined) {
   }
 }
 
+// NEW: Modal Submit Handlers
+async function handleAddActionTypeModalSubmit(interaction) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
+  try {
+    const name = interaction.fields
+      .getTextInputValue("actiontype_name")
+      .toLowerCase()
+      .replace(/\s+/g, "_");
+    const displayName = interaction.fields.getTextInputValue(
+      "actiontype_display_name"
+    );
+    const unit = interaction.fields.getTextInputValue("actiontype_unit");
+    const emoji =
+      interaction.fields.getTextInputValue("actiontype_emoji") || null;
+
+    // Check if action type already exists
+    const existingType = await ActionTypeModel.getByName(name);
+    if (existingType) {
+      return interaction.editReply({
+        content: `Action type "${name}" already exists.`,
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("admin_actiontypes")
+              .setLabel("Back to Action Types")
+              .setStyle(ButtonStyle.Secondary)
+          ),
+        ],
+      });
+    }
+
+    // Add the action type
+    await ActionTypeModel.add(name, displayName, unit, emoji);
+
+    await interaction.editReply({
+      content: `✅ Successfully added action type: **${displayName}** (\`${name}\`) with unit: **${unit}**`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Primary),
+          new ButtonBuilder()
+            .setCustomId("admin_back")
+            .setLabel("Back to Admin")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  } catch (error) {
+    console.error("Error adding action type:", error);
+    await interaction.editReply({
+      content: `❌ Error adding action type: ${error.message}`,
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder()
+            .setCustomId("admin_actiontypes")
+            .setLabel("Back to Action Types")
+            .setStyle(ButtonStyle.Secondary)
+        ),
+      ],
+    });
+  }
+}
+
 // Handle modal submissions for admin functions
 async function handleAdminModalSubmit(interaction) {
   // Verify admin permissions again
@@ -2438,6 +4177,16 @@ async function handleAdminModalSubmit(interaction) {
         ],
       });
     }
+  } else if (modalId === "admin_add_actiontype_modal") {
+    await handleAddActionTypeModalSubmit(interaction);
+  } else if (modalId.startsWith("admin_edit_actiontype_modal_")) {
+    await handleEditActionTypeModalSubmit(interaction);
+  } else if (modalId.startsWith("admin_add_tags_modal_")) {
+    await handleAddTagsModalSubmit(interaction);
+  } else if (modalId.startsWith("admin_remove_tags_modal_")) {
+    await handleRemoveTagsModalSubmit(interaction);
+  } else if (modalId === "admin_create_shared_modal") {
+    await handleCreateSharedModalSubmit(interaction);
   }
 }
 
