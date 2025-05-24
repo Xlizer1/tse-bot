@@ -505,9 +505,7 @@ async function handleCreateSharedButton(interaction) {
   const channelIdInput = new TextInputBuilder()
     .setCustomId("shared_channel_id")
     .setLabel("Channel ID (Optional)")
-    .setPlaceholder(
-      "Leave empty to post in the current channel)"
-    )
+    .setPlaceholder("Leave empty to post in the current channel)")
     .setStyle(TextInputStyle.Short)
     .setRequired(false);
 
