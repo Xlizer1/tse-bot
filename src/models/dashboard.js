@@ -1,27 +1,81 @@
+// Updated src/models/dashboard.js with configuration support
+
 const { pool } = require("../database");
 
 class DashboardModel {
-  // Add a new dashboard
-  static async add(messageId, channelId, guildId) {
+  // Add a new dashboard with configuration
+  static async addWithConfig(messageId, channelId, guildId, config = null) {
     try {
+      const defaultConfig = {
+        targetTags: ["org-wide"],
+        title: "Resource Collection Progress",
+        showAllIfNoFilter: true,
+      };
+
+      const finalConfig = config || defaultConfig;
+
       const [result] = await pool.execute(
-        "INSERT INTO dashboards (message_id, channel_id, guild_id) VALUES (?, ?, ?)",
-        [messageId, channelId, guildId]
+        "INSERT INTO dashboards (message_id, channel_id, guild_id, config) VALUES (?, ?, ?, ?)",
+        [messageId, channelId, guildId, JSON.stringify(finalConfig)]
       );
       return result.insertId;
     } catch (error) {
-      console.error("Error adding dashboard:", error);
+      console.error("Error adding dashboard with config:", error);
       throw error;
     }
   }
 
-  // Get all dashboards, optionally filter by guild
-  static async getAll(guildId = null) {
+  // Update existing add method to use default config
+  static async add(messageId, channelId, guildId) {
+    return this.addWithConfig(messageId, channelId, guildId, null);
+  }
+
+  // Get dashboard by message ID with config
+  static async getByMessageId(messageId) {
     try {
       const [rows] = await pool.execute(
-        "SELECT * FROM dashboards WHERE guild_id = ?",
-        [guildId]
+        "SELECT * FROM dashboards WHERE message_id = ?",
+        [messageId]
       );
+
+      if (rows.length > 0 && rows[0].config) {
+        // Parse config if it's a string
+        if (typeof rows[0].config === "string") {
+          rows[0].config = JSON.parse(rows[0].config);
+        }
+      }
+
+      return rows[0] || null;
+    } catch (error) {
+      console.error("Error getting dashboard by message ID:", error);
+      throw error;
+    }
+  }
+
+  // Get all dashboards with parsed configs
+  static async getAll(guildId = null) {
+    try {
+      let query = "SELECT * FROM dashboards";
+      let params = [];
+
+      if (guildId) {
+        query += " WHERE guild_id = ?";
+        params.push(guildId);
+      }
+
+      const [rows] = await pool.execute(query, params);
+
+      // Parse configs
+      rows.forEach((row) => {
+        if (row.config && typeof row.config === "string") {
+          try {
+            row.config = JSON.parse(row.config);
+          } catch (e) {
+            row.config = null;
+          }
+        }
+      });
+
       return rows;
     } catch (error) {
       console.error("Error getting dashboards:", error);
@@ -29,7 +83,51 @@ class DashboardModel {
     }
   }
 
-  // Remove a dashboard
+  // Update dashboard configuration
+  static async updateConfig(messageId, config) {
+    try {
+      const [result] = await pool.execute(
+        "UPDATE dashboards SET config = ? WHERE message_id = ?",
+        [JSON.stringify(config), messageId]
+      );
+      return result.affectedRows > 0;
+    } catch (error) {
+      console.error("Error updating dashboard config:", error);
+      throw error;
+    }
+  }
+
+  // Get all unique dashboard tags in use
+  static async getAllDashboardTags(guildId) {
+    try {
+      const [rows] = await pool.execute(
+        `SELECT config FROM dashboards WHERE guild_id = ? AND config IS NOT NULL`,
+        [guildId]
+      );
+
+      const tags = new Set();
+      rows.forEach((row) => {
+        try {
+          const config =
+            typeof row.config === "string"
+              ? JSON.parse(row.config)
+              : row.config;
+          if (config && config.targetTags && Array.isArray(config.targetTags)) {
+            config.targetTags.forEach((tag) => tags.add(tag));
+          }
+        } catch (e) {
+          // Skip invalid configs
+        }
+      });
+
+      return Array.from(tags);
+    } catch (error) {
+      console.error("Error getting dashboard tags:", error);
+      throw error;
+    }
+  }
+
+  // Keep existing methods...
   static async remove(messageId) {
     try {
       const [result] = await pool.execute(
@@ -46,7 +144,6 @@ class DashboardModel {
     }
   }
 
-  // Remove all dashboards in a channel
   static async removeByChannel(channelId) {
     try {
       const [result] = await pool.execute(

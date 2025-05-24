@@ -1,5 +1,4 @@
-// Option 1: Add unit selection to settarget command
-// In src/commands/settarget.js
+// Updated src/commands/settarget.js with tags support
 
 const { SlashCommandBuilder, MessageFlags } = require("discord.js");
 const ResourceModel = require("../models/resource");
@@ -32,7 +31,6 @@ module.exports = {
         .setRequired(true)
         .setMinValue(1)
     )
-    // NEW: Add unit selection option
     .addStringOption((option) =>
       option
         .setName("unit")
@@ -46,6 +44,15 @@ module.exports = {
           { name: "Kg (Kilograms)", value: "Kg" },
           { name: "Liters", value: "L" }
         )
+    )
+    // NEW: Add tags option
+    .addStringOption((option) =>
+      option
+        .setName("tags")
+        .setDescription(
+          "Comma-separated tags for dashboard filtering (e.g., 'idris,critical')"
+        )
+        .setRequired(false)
     ),
 
   async execute(interaction, guildId = null) {
@@ -61,7 +68,8 @@ module.exports = {
 
       if (!interaction.member.permissions.has("Administrator")) {
         return interaction.reply({
-          content: "You do not have permission to use this command. Only administrators can set targets.",
+          content:
+            "You do not have permission to use this command. Only administrators can set targets.",
           flags: MessageFlags.Ephemeral,
         });
       }
@@ -69,20 +77,46 @@ module.exports = {
       const action = interaction.options.getString("action");
       const resource = interaction.options.getString("resource").toLowerCase();
       const amount = interaction.options.getInteger("amount");
-      
-      // NEW: Get custom unit or fall back to action type default
+
+      // Get custom unit or fall back to action type default
       let customUnit = interaction.options.getString("unit");
-      
+
+      // NEW: Parse tags
+      const tagsInput = interaction.options.getString("tags");
+      let tags = ["org-wide"]; // Default tag
+
+      if (tagsInput) {
+        // Parse comma-separated tags, trim whitespace, and remove empty strings
+        tags = tagsInput
+          .split(",")
+          .map((tag) => tag.trim())
+          .filter((tag) => tag.length > 0);
+
+        // Ensure org-wide is included unless explicitly excluded
+        if (!tags.includes("org-wide") && !tags.includes("!org-wide")) {
+          tags.push("org-wide");
+        }
+
+        // Remove the exclusion marker
+        tags = tags.filter((tag) => !tag.startsWith("!"));
+      }
+
       // Get action type info for default unit
       const actionType = await ActionTypeModel.getByName(action);
       const defaultUnit = actionType ? actionType.unit : "SCU";
       const finalUnit = customUnit || defaultUnit;
 
       // Check if resource exists
-      const resourceCategory = action === "mine" ? "mining" : 
-                              action === "salvage" ? "salvage" : "haul";
+      const resourceCategory =
+        action === "mine"
+          ? "mining"
+          : action === "salvage"
+          ? "salvage"
+          : "haul";
       const resourceInfo = await ResourceModel.getByValueAndType(
-        resource, resourceCategory, currentGuildId
+        resource,
+        resourceCategory,
+        currentGuildId
       );
 
       if (!resourceInfo) {
@@ -94,23 +128,44 @@ module.exports = {
 
       // Check if target already exists
       const existingTarget = await TargetModel.getByActionAndResource(
-        action, resource, currentGuildId
+        action,
+        resource,
+        currentGuildId
       );
 
       if (existingTarget) {
-        // Update existing target with new unit
-        await TargetModel.updateAmountAndUnit(existingTarget.id, amount, finalUnit);
-        await interaction.reply(
-          `Target updated: ${action} ${amount} ${finalUnit} of ${resourceInfo.name}`
+        // Update existing target with new amount, unit, and tags
+        await TargetModel.updateAmountAndUnit(
+          existingTarget.id,
+          amount,
+          finalUnit
         );
+        await TargetModel.updateTags(existingTarget.id, tags);
+
+        await interaction.reply({
+          content: `Target updated: ${action} ${amount} ${finalUnit} of ${
+            resourceInfo.name
+          }\nTags: ${tags.join(", ")}`,
+          flags: MessageFlags.Ephemeral,
+        });
       } else {
-        // Create new target with custom unit
-        await TargetModel.createWithUnit(
-          action, resource, amount, finalUnit, interaction.user.id, currentGuildId
+        // Create new target with custom unit and tags
+        await TargetModel.createWithUnitAndTags(
+          action,
+          resource,
+          amount,
+          finalUnit,
+          interaction.user.id,
+          currentGuildId,
+          tags
         );
-        await interaction.reply(
-          `Target set: ${action} ${amount} ${finalUnit} of ${resourceInfo.name}`
-        );
+
+        await interaction.reply({
+          content: `Target set: ${action} ${amount} ${finalUnit} of ${
+            resourceInfo.name
+          }\nTags: ${tags.join(", ")}`,
+          flags: MessageFlags.Ephemeral,
+        });
       }
 
       await updateDashboards(interaction.client);
@@ -123,51 +178,100 @@ module.exports = {
     }
   },
 
-  // Add autocomplete for action types
+  // Add autocomplete for action types and existing tags
   async autocomplete(interaction, guildId = null) {
     const focusedOption = interaction.options.getFocused(true);
-    
+
     try {
       const currentGuildId = guildId || interaction.guild?.id;
-      
+
       if (focusedOption.name === "action") {
         const actionTypes = await ActionTypeModel.getAll();
-        const filtered = actionTypes.filter(type => 
-          type.name.toLowerCase().includes(focusedOption.value.toLowerCase()) ||
-          type.display_name.toLowerCase().includes(focusedOption.value.toLowerCase())
+        const filtered = actionTypes.filter(
+          (type) =>
+            type.name
+              .toLowerCase()
+              .includes(focusedOption.value.toLowerCase()) ||
+            type.display_name
+              .toLowerCase()
+              .includes(focusedOption.value.toLowerCase())
         );
-        
+
         await interaction.respond(
-          filtered.map(type => ({
-            name: `${type.emoji || ''} ${type.display_name} (Default: ${type.unit})`,
-            value: type.name
+          filtered.map((type) => ({
+            name: `${type.emoji || ""} ${type.display_name} (Default: ${
+              type.unit
+            })`,
+            value: type.name,
           }))
         );
       } else if (focusedOption.name === "resource") {
         const selectedAction = interaction.options.getString("action");
         let resources = [];
-        
+
         if (selectedAction && currentGuildId) {
-          resources = await ResourceModel.getByActionType(selectedAction, currentGuildId);
+          resources = await ResourceModel.getByActionType(
+            selectedAction,
+            currentGuildId
+          );
         } else if (currentGuildId) {
           resources = await ResourceModel.getAll(currentGuildId);
         }
-        
-        const filtered = resources.filter(resource => 
-          resource.name.toLowerCase().includes(focusedOption.value.toLowerCase()) ||
-          resource.value.toLowerCase().includes(focusedOption.value.toLowerCase())
+
+        const filtered = resources.filter(
+          (resource) =>
+            resource.name
+              .toLowerCase()
+              .includes(focusedOption.value.toLowerCase()) ||
+            resource.value
+              .toLowerCase()
+              .includes(focusedOption.value.toLowerCase())
         );
-        
+
         await interaction.respond(
-          filtered.map(resource => ({
+          filtered.map((resource) => ({
             name: resource.name,
-            value: resource.value
+            value: resource.value,
           }))
         );
+      } else if (focusedOption.name === "tags") {
+        // Suggest existing tags
+        if (currentGuildId) {
+          const existingTags = await TargetModel.getAllTags(currentGuildId);
+
+          // Add some common suggestions
+          const commonTags = [
+            "org-wide",
+            "idris",
+            "critical",
+            "event",
+            "personal",
+            "alliance",
+          ];
+          const allTags = [...new Set([...existingTags, ...commonTags])];
+
+          // Filter based on what the user has typed
+          const userInput = focusedOption.value.toLowerCase();
+          const currentTags = userInput.split(",").map((t) => t.trim());
+          const lastTag = currentTags[currentTags.length - 1];
+
+          const filtered = allTags
+            .filter((tag) => tag.toLowerCase().includes(lastTag))
+            .slice(0, 25);
+
+          await interaction.respond(
+            filtered.map((tag) => ({
+              name: tag,
+              value: currentTags.slice(0, -1).concat(tag).join(", "),
+            }))
+          );
+        } else {
+          await interaction.respond([]);
+        }
       }
     } catch (error) {
-      console.error('Error during settarget autocomplete:', error);
+      console.error("Error during settarget autocomplete:", error);
       await interaction.respond([]);
     }
-  }
+  },
 };

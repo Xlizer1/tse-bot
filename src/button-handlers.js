@@ -15,22 +15,23 @@ const {
   handleRefreshDashboard,
   updateDashboards,
 } = require("./dashboard-updater");
+const { DashboardModel } = require("./models/dashboard");
 
 // Handler for button interactions
 async function handleButtonInteraction(interaction, guildId) {
   // Use provided guildId or fallback to interaction guild
   const currentGuildId = guildId || interaction.guild?.id;
-  
+
   if (!currentGuildId) {
     return interaction.reply({
       content: "This command can only be used in a server.",
       flags: MessageFlags.Ephemeral,
     });
   }
-  
+
   // Get the button ID that was clicked
   const buttonId = interaction.customId;
-  
+
   // Extract source guild ID from shared dashboard buttons
   let sourceGuildId = currentGuildId;
   if (buttonId.includes("_")) {
@@ -48,7 +49,10 @@ async function handleButtonInteraction(interaction, guildId) {
   if (buttonId.startsWith("admin_")) {
     // Import admin handlers dynamically to avoid circular dependency
     const adminHandlers = require("./admin-handlers");
-    await adminHandlers.handleAdminButtonInteraction(interaction, currentGuildId);
+    await adminHandlers.handleAdminButtonInteraction(
+      interaction,
+      currentGuildId
+    );
     return;
   }
 
@@ -83,13 +87,32 @@ async function handleButtonInteraction(interaction, guildId) {
 // Handle the Log Resource button
 async function handleAddResourcesButton(interaction, guildId) {
   try {
-    // Get all targets with progress for this guild
-    const targets = await TargetModel.getAllWithProgress(guildId);
+    // Check if this interaction is from a dashboard with specific filters
+    let targetTags = null;
+    const dashboard = await DashboardModel.getByMessageId(
+      interaction.message.id
+    );
+
+    if (dashboard && dashboard.config && dashboard.config.targetTags) {
+      targetTags = dashboard.config.targetTags;
+    }
+
+    // Get targets with optional filtering based on dashboard configuration
+    const targets = await TargetModel.getAllWithProgress(guildId, targetTags);
 
     if (targets.length === 0) {
+      let message = "No targets have been set";
+      if (targetTags && targetTags.length > 0) {
+        message += ` for this dashboard (filtering by: ${targetTags.join(
+          ", "
+        )})`;
+      } else {
+        message += " for this server";
+      }
+      message += ". Ask an admin to set targets first.";
+
       return interaction.reply({
-        content:
-          "No targets have been set yet for this server. Ask an admin to set targets first.",
+        content: message,
         flags: MessageFlags.Ephemeral,
       });
     }
@@ -97,25 +120,25 @@ async function handleAddResourcesButton(interaction, guildId) {
     // Group targets by action type
     const actionTypes = await ActionTypeModel.getAll();
     const actionMap = new Map();
-    
-    actionTypes.forEach(type => {
+
+    actionTypes.forEach((type) => {
       actionMap.set(type.name, {
         id: type.id,
         name: type.name,
         displayName: type.display_name,
         unit: type.unit,
         emoji: type.emoji,
-        targets: []
+        targets: [],
       });
     });
-    
+
     // Add targets to their respective action types
-    targets.forEach(target => {
+    targets.forEach((target) => {
       if (actionMap.has(target.action)) {
         actionMap.get(target.action).targets.push(target);
       }
     });
-    
+
     // Create a select menu for action type selection first
     const selectMenu = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
@@ -124,20 +147,36 @@ async function handleAddResourcesButton(interaction, guildId) {
     );
 
     // Add options for each action type that has targets
-    actionMap.forEach(action => {
+    actionMap.forEach((action) => {
       if (action.targets.length > 0) {
+        let description = `${action.targets.length} ${
+          action.targets.length === 1 ? "target" : "targets"
+        } (${action.unit})`;
+
+        // Add tag info if filtering
+        if (targetTags && targetTags.length > 0) {
+          description += ` - ${targetTags.join(", ")}`;
+        }
+
         selectMenu.components[0].addOptions({
           label: action.displayName,
-          description: `${action.targets.length} ${action.targets.length === 1 ? 'target' : 'targets'} (${action.unit})`,
+          description: description,
           value: action.name,
-          emoji: action.emoji
+          emoji: action.emoji,
         });
       }
     });
 
     // Send the selection menu
+    let replyContent = "Please select which action type you want to log:";
+    if (targetTags && targetTags.length > 0) {
+      replyContent += `\n🏷️ *Showing only targets tagged with: ${targetTags.join(
+        ", "
+      )}*`;
+    }
+
     await interaction.reply({
-      content: "Please select which action type you want to log:",
+      content: replyContent,
       components: [selectMenu],
       flags: MessageFlags.Ephemeral,
     });
@@ -167,7 +206,7 @@ async function handleViewProgressButton(interaction, guildId) {
     const mockOptions = {
       getString: () => null,
       getInteger: () => null,
-      getFocused: () => null
+      getFocused: () => null,
     };
 
     interaction.options = mockOptions;
@@ -200,7 +239,7 @@ async function handleViewLeaderboardButton(interaction, guildId) {
     const mockOptions = {
       getString: () => null,
       getInteger: () => null,
-      getFocused: () => null
+      getFocused: () => null,
     };
 
     interaction.options = mockOptions;
@@ -232,7 +271,7 @@ async function handleViewLocationsButton(interaction, guildId) {
     // Create a mock interaction with no options
     const mockOptions = {
       getString: () => null,
-      getFocused: () => null
+      getFocused: () => null,
     };
 
     interaction.options = mockOptions;
@@ -270,43 +309,78 @@ async function handleSelectMenuInteraction(interaction) {
   if (interaction.customId.startsWith("action_select")) {
     try {
       const actionType = interaction.values[0];
-      
-      // Get all targets for this action type in this guild
-      const targets = await TargetModel.getAllWithProgress(guildId);
-      const filteredTargets = targets.filter(target => target.action === actionType);
-      
+
+      // Check if this is from a filtered dashboard
+      let targetTags = null;
+      const dashboard = await DashboardModel.getByMessageId(
+        interaction.message.reference?.messageId || interaction.message.id
+      );
+
+      if (dashboard && dashboard.config && dashboard.config.targetTags) {
+        targetTags = dashboard.config.targetTags;
+      }
+
+      // Get all targets for this action type in this guild with optional filtering
+      const targets = await TargetModel.getAllWithProgress(guildId, targetTags);
+      const filteredTargets = targets.filter(
+        (target) => target.action === actionType
+      );
+
       if (filteredTargets.length === 0) {
         return interaction.reply({
-          content: "No targets found for this action type in this server.",
+          content:
+            "No targets found for this action type in this dashboard context.",
           flags: MessageFlags.Ephemeral,
         });
       }
-      
+
       // Get the action type info
       const actionTypeInfo = await ActionTypeModel.getByName(actionType);
-      
+
       // Create a select menu for resource selection based on action type
       const selectMenu = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
           .setCustomId(`resource_select_${guildId}`)
-          .setPlaceholder(`Select a ${actionTypeInfo.display_name.toLowerCase()} resource`)
+          .setPlaceholder(
+            `Select a ${actionTypeInfo.display_name.toLowerCase()} resource`
+          )
       );
-      
+
       // Add options for each target within this action type
-      filteredTargets.forEach(target => {
-        const resourceName = target.resource_name || 
-                            target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
-        
+      filteredTargets.forEach((target) => {
+        const resourceName =
+          target.resource_name ||
+          target.resource.charAt(0).toUpperCase() + target.resource.slice(1);
+
+        // Include tags in description if they exist
+        let description = `Target: ${target.target_amount} ${
+          target.unit || actionTypeInfo.unit
+        }`;
+        if (target.tags) {
+          const tags =
+            typeof target.tags === "string"
+              ? JSON.parse(target.tags)
+              : target.tags;
+          if (tags && tags.length > 0) {
+            description += ` | Tags: ${tags.join(", ")}`;
+          }
+        }
+
         selectMenu.components[0].addOptions({
           label: resourceName,
-          description: `Target: ${target.target_amount} ${target.unit || actionTypeInfo.unit}`,
+          description: description,
           value: `${target.action}_${target.resource}`,
         });
       });
-      
+
       // Send the resource selection menu
+      let updateContent = `Please select which ${actionTypeInfo.display_name.toLowerCase()} resource you want to log:`;
+      if (targetTags && targetTags.length > 0) {
+        updateContent += `\n🏷️ *Dashboard filter: ${targetTags.join(", ")}*`;
+      }
+
       await interaction.update({
-        content: `Please select which ${actionTypeInfo.display_name.toLowerCase()} resource you want to log:`,
+        content: updateContent,
         components: [selectMenu],
       });
     } catch (error) {
@@ -318,34 +392,49 @@ async function handleSelectMenuInteraction(interaction) {
     }
   } else if (interaction.customId.startsWith("resource_select")) {
     try {
-      const [action, resource] = interaction.values[0].split('_');
-      
+      const [action, resource] = interaction.values[0].split("_");
+
       // Get target details for this guild
-      const target = await TargetModel.getByActionAndResource(action, resource, guildId);
-      
+      const target = await TargetModel.getByActionAndResource(
+        action,
+        resource,
+        guildId
+      );
+
       if (!target) {
         return interaction.reply({
-          content: "The selected target could not be found in this server. Please try again.",
+          content:
+            "The selected target could not be found in this server. Please try again.",
           flags: MessageFlags.Ephemeral,
         });
       }
-      
+
       // Get action type info for unit
       const actionType = await ActionTypeModel.getByName(action);
       const unit = target.unit || (actionType ? actionType.unit : "SCU");
-      const actionDisplay = target.action_display_name || 
-                          (actionType ? actionType.display_name : action.charAt(0).toUpperCase() + action.slice(1));
-      
+      const actionDisplay =
+        target.action_display_name ||
+        (actionType
+          ? actionType.display_name
+          : action.charAt(0).toUpperCase() + action.slice(1));
+
       // Get resource name
-      const resourceInfo = await ResourceModel.getByValueAndType(resource, action, guildId);
-      const resourceName = target.resource_name || 
-                           (resourceInfo ? resourceInfo.name : resource.charAt(0).toUpperCase() + resource.slice(1));
-      
+      const resourceInfo = await ResourceModel.getByValueAndType(
+        resource,
+        action,
+        guildId
+      );
+      const resourceName =
+        target.resource_name ||
+        (resourceInfo
+          ? resourceInfo.name
+          : resource.charAt(0).toUpperCase() + resource.slice(1));
+
       // Create a modal for inputting details
       const modal = new ModalBuilder()
         .setCustomId(`add_modal_${target.id}`)
         .setTitle(`Log ${actionDisplay} ${resourceName}`);
-      
+
       // Add input fields
       const amountInput = new TextInputBuilder()
         .setCustomId("amount")
@@ -353,19 +442,19 @@ async function handleSelectMenuInteraction(interaction) {
         .setStyle(TextInputStyle.Short)
         .setPlaceholder(`Enter the amount in ${unit}`)
         .setRequired(true);
-      
+
       const locationInput = new TextInputBuilder()
         .setCustomId("location")
         .setLabel("Location")
         .setStyle(TextInputStyle.Short)
         .setPlaceholder("Enter where you delivered or found the resource")
         .setRequired(true);
-      
+
       const row1 = new ActionRowBuilder().addComponents(amountInput);
       const row2 = new ActionRowBuilder().addComponents(locationInput);
-      
+
       modal.addComponents(row1, row2);
-      
+
       // Show the modal
       await interaction.showModal(modal);
     } catch (error) {
@@ -430,13 +519,23 @@ async function handleModalSubmitInteraction(interaction) {
       // Get action type info for unit and display name
       const actionType = await ActionTypeModel.getByName(target.action);
       const unit = target.unit || (actionType ? actionType.unit : "SCU");
-      const actionDisplay = target.action_display_name || 
-                          (actionType ? actionType.display_name : target.action.charAt(0).toUpperCase() + target.action.slice(1));
-      
+      const actionDisplay =
+        target.action_display_name ||
+        (actionType
+          ? actionType.display_name
+          : target.action.charAt(0).toUpperCase() + target.action.slice(1));
+
       // Get resource name
-      const resourceInfo = await ResourceModel.getByValueAndType(target.resource, target.action, target.guild_id);
-      const resourceName = target.resource_name || 
-                           (resourceInfo ? resourceInfo.name : target.resource.charAt(0).toUpperCase() + target.resource.slice(1));
+      const resourceInfo = await ResourceModel.getByValueAndType(
+        target.resource,
+        target.action,
+        target.guild_id
+      );
+      const resourceName =
+        target.resource_name ||
+        (resourceInfo
+          ? resourceInfo.name
+          : target.resource.charAt(0).toUpperCase() + target.resource.slice(1));
 
       // Calculate progress percentage
       const current = updatedTarget.current_amount || 0;
