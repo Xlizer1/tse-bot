@@ -2759,10 +2759,12 @@ async function handleRemoveTagsTargetSelect(interaction, targetId) {
   }
 }
 
-async function handleRemoveTagsTagSelect(interaction, selectedTags) {
+async function handleRemoveTagsTagSelect(interaction) {
   try {
     // Extract target ID from custom ID
-    const targetId = interaction.customId.split("_").pop();
+    const customIdParts = interaction.customId.split("_");
+    const targetId = customIdParts[customIdParts.length - 1];
+
     const target = await TargetModel.getById(targetId);
 
     if (!target) {
@@ -2784,7 +2786,7 @@ async function handleRemoveTagsTagSelect(interaction, selectedTags) {
       currentTags = JSON.parse(currentTags);
     }
 
-    // Remove selected tags
+    // Get selected tags to remove from interaction.values (multi-select)
     const selectedTagList = interaction.values;
     const newTags = currentTags.filter((tag) => !selectedTagList.includes(tag));
 
