@@ -3683,8 +3683,20 @@ async function handleRemoveResourceSelect(interaction, resourceValue) {
 // Handle resource selection for new target
 async function handleAddTargetResourceSelect(interaction, combined) {
   try {
-    // Split the combined value to get action and resource
-    const [actionType, resourceValue] = combined.split("_", 2);
+    // FIXED: Properly split to handle resource values with underscores
+    // Split only on the first underscore to separate action from resource
+    const firstUnderscoreIndex = combined.indexOf("_");
+
+    if (firstUnderscoreIndex === -1) {
+      throw new Error("Invalid combined value format");
+    }
+
+    const actionType = combined.substring(0, firstUnderscoreIndex);
+    const resourceValue = combined.substring(firstUnderscoreIndex + 1);
+
+    console.log(
+      `Debug: actionType="${actionType}", resourceValue="${resourceValue}"`
+    );
 
     // Get the action type info for the unit
     const actionTypeInfo = await ActionTypeModel.getByName(actionType);
