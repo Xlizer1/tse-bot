@@ -382,12 +382,42 @@ class ContributionModel {
   // Get top contributors for specific targets (for filtered dashboards)
   static async getTopContributorsForTargets(targetIds, limit = 10) {
     try {
-      if (!targetIds || targetIds.length === 0) {
+      // Validate and filter target IDs
+      if (!targetIds || !Array.isArray(targetIds) || targetIds.length === 0) {
+        console.log("No target IDs provided for top contributors");
         return [];
       }
 
+      // Filter out invalid target IDs and ensure they're integers
+      const validTargetIds = targetIds
+        .filter((id) => id !== null && id !== undefined && !isNaN(id))
+        .map((id) => parseInt(id))
+        .filter((id) => id > 0); // Ensure positive integers
+
+      if (validTargetIds.length === 0) {
+        console.log("No valid target IDs found for top contributors");
+        return [];
+      }
+
+      console.log(
+        `Getting top contributors for ${validTargetIds.length} targets:`,
+        validTargetIds
+      );
+
       // Create placeholders for SQL IN clause
-      const placeholders = targetIds.map(() => "?").join(",");
+      const placeholders = validTargetIds.map(() => "?").join(",");
+
+      // Ensure limit is a valid integer
+      const validLimit = Math.max(1, Math.min(parseInt(limit) || 10, 100));
+
+      // Prepare parameters array
+      const parameters = [...validTargetIds, validLimit];
+
+      console.log(
+        `SQL parameters count: ${parameters.length}, Placeholders: ${
+          validTargetIds.length + 1
+        }`
+      );
 
       const [rows] = await pool.execute(
         `SELECT c.user_id, c.username, SUM(c.amount) as total_amount
@@ -396,16 +426,18 @@ class ContributionModel {
          GROUP BY c.user_id, c.username
          ORDER BY total_amount DESC
          LIMIT ?`,
-        [...targetIds, parseInt(limit) || 10]
+        parameters
       );
 
+      console.log(`Found ${rows.length} top contributors`);
       return rows;
     } catch (error) {
-      console.error(
-        "Error getting top contributors for specific targets:",
-        error
-      );
-      throw error;
+      console.error("Error getting top contributors for targets:", error);
+      console.error("Target IDs provided:", targetIds);
+      console.error("Limit provided:", limit);
+
+      // Return empty array instead of throwing to prevent dashboard crashes
+      return [];
     }
   }
 }

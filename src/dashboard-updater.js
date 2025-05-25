@@ -45,20 +45,41 @@ async function generateDashboardInsights(guildId, targetTags = null) {
     const targets = await TargetModel.getAllWithProgress(guildId, targetTags);
     const actionTypes = await ActionTypeModel.getAll();
 
-    // For top contributors, we need to filter by the targets in this dashboard
-    const targetIds = targets.map((t) => t.id);
-    const topContributors =
-      await ContributionModel.getTopContributorsForTargets(targetIds, 3);
+    // FIXED: Validate target IDs before getting top contributors
+    const validTargets = targets.filter((t) => t && t.id && !isNaN(t.id));
+    const targetIds = validTargets.map((t) => parseInt(t.id));
 
-    // Calculate overall stats
-    const totalTargets = targets.length;
-    const uniqueResourceTypes = new Set(targets.map((t) => t.resource)).size;
-    const totalContributions = targets.reduce(
-      (sum, target) => sum + (target.current_amount || 0),
+    console.log(
+      `Dashboard insights: Found ${targets.length} targets, ${validTargets.length} valid, ${targetIds.length} IDs`
+    );
+
+    // For top contributors, we need to filter by the targets in this dashboard
+    let topContributors = [];
+    if (targetIds.length > 0) {
+      try {
+        topContributors = await ContributionModel.getTopContributorsForTargets(
+          targetIds,
+          3
+        );
+      } catch (contributorError) {
+        console.error(
+          "Error getting top contributors, continuing without them:",
+          contributorError
+        );
+        topContributors = [];
+      }
+    }
+
+    // Calculate overall stats using valid targets
+    const totalTargets = validTargets.length;
+    const uniqueResourceTypes = new Set(validTargets.map((t) => t.resource))
+      .size;
+    const totalContributions = validTargets.reduce(
+      (sum, target) => sum + (parseInt(target.current_amount) || 0),
       0
     );
-    const totalTargetAmount = targets.reduce(
-      (sum, target) => sum + target.target_amount,
+    const totalTargetAmount = validTargets.reduce(
+      (sum, target) => sum + (parseInt(target.target_amount) || 0),
       0
     );
     const overallProgress =
@@ -66,26 +87,30 @@ async function generateDashboardInsights(guildId, targetTags = null) {
         ? Math.floor((totalContributions / totalTargetAmount) * 100)
         : 0;
 
-    // Resource type breakdown
-    const resourceBreakdown = targets.reduce((acc, target) => {
+    // Resource type breakdown using valid targets
+    const resourceBreakdown = validTargets.reduce((acc, target) => {
       const action = target.action;
       if (!acc[action]) acc[action] = { total: 0, current: 0 };
-      acc[action].total += target.target_amount;
-      acc[action].current += target.current_amount || 0;
+      acc[action].total += parseInt(target.target_amount) || 0;
+      acc[action].current += parseInt(target.current_amount) || 0;
       return acc;
     }, {});
 
-    // Closest to completion and furthest from completion
-    const sortedTargets = targets
+    // Closest to completion and furthest from completion using valid targets
+    const sortedTargets = validTargets
       .map((target) => ({
         ...target,
+        current_amount: parseInt(target.current_amount) || 0,
+        target_amount: parseInt(target.target_amount) || 0,
         percentage: Math.floor(
-          ((target.current_amount || 0) / target.target_amount) * 100
+          ((parseInt(target.current_amount) || 0) /
+            (parseInt(target.target_amount) || 1)) *
+            100
         ),
       }))
       .sort((a, b) => b.percentage - a.percentage);
 
-    // Prepare insights
+    // Rest of the function continues as before...
     const insights = {
       totalTargets,
       uniqueResourceTypes,
@@ -521,11 +546,43 @@ ContributionModel.getTopContributorsForTargets = async function (
   limit = 10
 ) {
   try {
-    if (!targetIds || targetIds.length === 0) {
+    // Validate and filter target IDs
+    if (!targetIds || !Array.isArray(targetIds) || targetIds.length === 0) {
+      console.log("No target IDs provided for top contributors");
       return [];
     }
 
-    const placeholders = targetIds.map(() => "?").join(",");
+    // Filter out invalid target IDs and ensure they're integers
+    const validTargetIds = targetIds
+      .filter((id) => id !== null && id !== undefined && !isNaN(id))
+      .map((id) => parseInt(id))
+      .filter((id) => id > 0); // Ensure positive integers
+
+    if (validTargetIds.length === 0) {
+      console.log("No valid target IDs found for top contributors");
+      return [];
+    }
+
+    console.log(
+      `Getting top contributors for ${validTargetIds.length} targets:`,
+      validTargetIds
+    );
+
+    // Create placeholders for SQL IN clause
+    const placeholders = validTargetIds.map(() => "?").join(",");
+
+    // Ensure limit is a valid integer
+    const validLimit = Math.max(1, Math.min(parseInt(limit) || 10, 100));
+
+    // Prepare parameters array
+    const parameters = [...validTargetIds, validLimit];
+
+    console.log(
+      `SQL parameters count: ${parameters.length}, Placeholders: ${
+        validTargetIds.length + 1
+      }`
+    );
+
     const [rows] = await pool.execute(
       `SELECT c.user_id, c.username, SUM(c.amount) as total_amount
        FROM contributions c
@@ -533,12 +590,18 @@ ContributionModel.getTopContributorsForTargets = async function (
        GROUP BY c.user_id, c.username
        ORDER BY total_amount DESC
        LIMIT ?`,
-      [...targetIds, parseInt(limit) || 10]
+      parameters
     );
+
+    console.log(`Found ${rows.length} top contributors`);
     return rows;
   } catch (error) {
     console.error("Error getting top contributors for targets:", error);
-    throw error;
+    console.error("Target IDs provided:", targetIds);
+    console.error("Limit provided:", limit);
+
+    // Return empty array instead of throwing to prevent dashboard crashes
+    return [];
   }
 };
 
