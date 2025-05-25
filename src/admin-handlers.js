@@ -21,6 +21,7 @@ const { DashboardModel, SettingModel } = require("./models/dashboard");
 
 const { updateDashboards } = require("./dashboard-updater");
 const ActionTypeModel = require("./models/actionType");
+const { safeEmbedReply, addLongContentField } = require("./utils/embedUtils");
 
 async function handleAdminButtonInteraction(interaction) {
   if (!interaction.member.permissions.has("Administrator")) {
@@ -648,25 +649,31 @@ async function handleResourcesButton(interaction) {
       }\``;
     };
 
-    // Add fields for each action type
+    // Add fields for each action type using the utility function
     for (const actionType of actionTypes) {
       const resources = groupedResources[actionType.name] || [];
+      const fieldName = `${actionType.emoji || "📦"} ${
+        actionType.display_name
+      } Resources (${actionType.unit})`;
 
-      resourcesEmbed.addFields({
-        name: `${actionType.emoji || "📦"} ${
-          actionType.display_name
-        } Resources (${actionType.unit})`,
-        value:
-          resources.length > 0
-            ? resources.map(formatResourceDescription).join("\n")
-            : `No ${actionType.display_name.toLowerCase()} resources defined`,
-        inline: false,
-      });
+      if (resources.length > 0) {
+        const resourceDescriptions = resources.map(formatResourceDescription);
+
+        // Use utility function to handle long content
+        addLongContentField(resourcesEmbed, fieldName, resourceDescriptions, {
+          emptyMessage: `No ${actionType.display_name.toLowerCase()} resources defined`,
+        });
+      } else {
+        resourcesEmbed.addFields({
+          name: fieldName,
+          value: `No ${actionType.display_name.toLowerCase()} resources defined`,
+          inline: false,
+        });
+      }
     }
 
     // Add statistics
     const totalResources = Object.values(groupedResources).flat().length;
-
     const resourceStats = [`**Total Resource Types**: ${totalResources}`];
 
     // Add count per action type
@@ -675,10 +682,9 @@ async function handleResourcesButton(interaction) {
       resourceStats.push(`• ${type.display_name}: ${count}`);
     });
 
-    resourcesEmbed.addFields({
-      name: "📊 Resource Overview",
-      value: resourceStats.join("\n"),
-      inline: false,
+    // Use utility function for stats field
+    addLongContentField(resourcesEmbed, "📊 Resource Overview", resourceStats, {
+      separator: "\n",
     });
 
     // Create button row
@@ -700,14 +706,21 @@ async function handleResourcesButton(interaction) {
         .setEmoji("🔙")
     );
 
-    // Reply with the resources embed
-    await interaction.update({
+    // Use safe embed reply
+    await safeEmbedReply(interaction, {
       embeds: [resourcesEmbed],
       components: [row],
     });
+
+    // Alternative: if you prefer to keep the original structure
+    // await interaction.update({
+    //   embeds: [resourcesEmbed],
+    //   components: [row],
+    // });
   } catch (error) {
     console.error("Error in handleResourcesButton:", error);
-    await interaction.update({
+
+    await safeEmbedReply(interaction, {
       content: "An error occurred while loading resources. Please try again.",
       embeds: [],
       components: [
@@ -3668,11 +3681,10 @@ async function handleRemoveResourceSelect(interaction, resourceValue) {
 }
 
 // Handle resource selection for new target
-// Handle resource selection for new target
 async function handleAddTargetResourceSelect(interaction, combined) {
   try {
     // Split the combined value to get action and resource
-    const [actionType, resourceValue] = combined.split("_");
+    const [actionType, resourceValue] = combined.split("_", 2);
 
     // Get the action type info for the unit
     const actionTypeInfo = await ActionTypeModel.getByName(actionType);
@@ -3694,9 +3706,22 @@ async function handleAddTargetResourceSelect(interaction, combined) {
       );
     }
 
+    // Create a shorter custom ID to avoid Discord's 100-character limit
+    // Use a hash or shortened version of the resource value
+    const shortResourceId =
+      resourceValue.length > 30
+        ? resourceValue.substring(0, 30) + "_" + resourceValue.length
+        : resourceValue;
+
+    const customId = `admin_add_target_modal_${actionType}_${shortResourceId}`;
+
+    // Ensure the custom ID doesn't exceed 100 characters
+    const finalCustomId =
+      customId.length > 100 ? customId.substring(0, 100) : customId;
+
     // Create modal for target amount AND unit selection
     const modal = new ModalBuilder()
-      .setCustomId(`admin_add_target_modal_${actionType}_${resourceValue}`)
+      .setCustomId(finalCustomId)
       .setTitle(`Set Target for ${resourceInfo.name}`);
 
     // Add input field for amount
@@ -3718,10 +3743,38 @@ async function handleAddTargetResourceSelect(interaction, combined) {
       .setStyle(TextInputStyle.Short)
       .setRequired(true);
 
+    // Store the full resource value in a hidden field so we can retrieve it later
+    const resourceValueInput = new TextInputBuilder()
+      .setCustomId("resource_value_full")
+      .setLabel("Resource ID (do not edit)")
+      .setValue(resourceValue)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
+    // Add action type as hidden field too
+    const actionTypeInput = new TextInputBuilder()
+      .setCustomId("action_type_full")
+      .setLabel("Action Type (do not edit)")
+      .setValue(actionType)
+      .setStyle(TextInputStyle.Short)
+      .setRequired(true);
+
     // Add rows to modal
     const firstActionRow = new ActionRowBuilder().addComponents(amountInput);
     const secondActionRow = new ActionRowBuilder().addComponents(unitInput);
-    modal.addComponents(firstActionRow, secondActionRow);
+    const thirdActionRow = new ActionRowBuilder().addComponents(
+      resourceValueInput
+    );
+    const fourthActionRow = new ActionRowBuilder().addComponents(
+      actionTypeInput
+    );
+
+    modal.addComponents(
+      firstActionRow,
+      secondActionRow,
+      thirdActionRow,
+      fourthActionRow
+    );
 
     // Show the modal
     await interaction.showModal(modal);
@@ -3866,43 +3919,26 @@ async function handleAdminModalSubmit(interaction) {
       });
     }
   } else if (modalId.startsWith("admin_add_target_modal_")) {
-    // Extract actionType and resourceValue from the modal ID
-    // The format is admin_add_target_modal_ACTION_RESOURCE
-    // Remove the prefix to get ACTION_RESOURCE
-
-    // Extract actionType and resourceValue from the modal ID
-    const rawValue = modalId.replace("admin_add_target_modal_", "");
-
-    // Find the first underscore to split action and resource
-    const firstUnderscoreIndex = rawValue.indexOf("_");
-    if (firstUnderscoreIndex === -1) {
-      return interaction.reply({
-        content:
-          "Invalid modal ID format. Cannot determine action and resource.",
-        flags: MessageFlags.Ephemeral,
-      });
-    }
-
-    const actionType = rawValue.substring(0, firstUnderscoreIndex);
-    const resourceValue = rawValue.substring(firstUnderscoreIndex + 1);
+    // NEW APPROACH: Get action type and resource from hidden fields instead of parsing modalId
 
     // First, acknowledge the interaction to prevent timeout
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
-      // Get action type info
-      const actionTypeInfo = await ActionTypeModel.getByName(actionType);
-      if (!actionTypeInfo) {
-        throw new Error(`Action type "${actionType}" not found`);
-      }
-
-      // Parse the amount and unit
+      // Get values from the modal fields (including our hidden fields)
       const amount = parseInt(
         interaction.fields.getTextInputValue("target_amount")
       );
       const customUnit = interaction.fields
         .getTextInputValue("target_unit")
         .trim();
+
+      // Get the full values from hidden fields
+      const resourceValue = interaction.fields.getTextInputValue(
+        "resource_value_full"
+      );
+      const actionType =
+        interaction.fields.getTextInputValue("action_type_full");
 
       if (isNaN(amount) || amount <= 0) {
         return interaction.editReply({
@@ -3939,6 +3975,12 @@ async function handleAdminModalSubmit(interaction) {
         customUnit.length > 50 ? customUnit.substring(0, 50) : customUnit;
 
       const guildId = interaction.guild.id;
+
+      // Get action type info
+      const actionTypeInfo = await ActionTypeModel.getByName(actionType);
+      if (!actionTypeInfo) {
+        throw new Error(`Action type "${actionType}" not found`);
+      }
 
       // Get resource info
       const resourceInfo = await ResourceModel.getByValueAndType(
