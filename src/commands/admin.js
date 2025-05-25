@@ -1,3 +1,4 @@
+// Updated src/commands/admin.js to match the enhanced admin-handlers.js
 const {
   SlashCommandBuilder,
   EmbedBuilder,
@@ -23,7 +24,7 @@ module.exports = {
         });
       }
 
-      // Create dashboard embed
+      // Create dashboard embed - ENHANCED with all features
       const dashboardEmbed = new EmbedBuilder()
         .setColor(0x0099ff)
         .setTitle("TSE Admin Dashboard")
@@ -38,6 +39,21 @@ module.exports = {
             name: "Target Management",
             value:
               "Set collection targets or reset progress for specific resources.",
+          },
+          {
+            name: "Action Types Management",
+            value:
+              "Create, update, or delete action types (mining, salvage, etc.).",
+          },
+          {
+            name: "Tag Management",
+            value:
+              "Manage tags on targets for dashboard organization and filtering.",
+          },
+          {
+            name: "Shared Dashboards",
+            value:
+              "Create dashboards that display data from other Discord servers.",
           },
           {
             name: "Data Export",
@@ -55,7 +71,7 @@ module.exports = {
         .setFooter({ text: "Terra Star Expeditionary Admin Dashboard" })
         .setTimestamp();
 
-      // Create button rows
+      // Create button rows - ENHANCED with new buttons (8 total)
       const row1 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("admin_resources")
@@ -64,14 +80,29 @@ module.exports = {
         new ButtonBuilder()
           .setCustomId("admin_targets")
           .setLabel("Target Management")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId("admin_actiontypes")
+          .setLabel("Action Types")
           .setStyle(ButtonStyle.Primary)
       );
 
       const row2 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
+          .setCustomId("admin_managetags")
+          .setLabel("Tag Management")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
+          .setCustomId("admin_sharedashboard")
+          .setLabel("Shared Dashboards")
+          .setStyle(ButtonStyle.Primary),
+        new ButtonBuilder()
           .setCustomId("admin_export")
           .setLabel("Export Data")
-          .setStyle(ButtonStyle.Success),
+          .setStyle(ButtonStyle.Success)
+      );
+
+      const row3 = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("admin_display")
           .setLabel("Display Controls")
@@ -82,10 +113,10 @@ module.exports = {
           .setStyle(ButtonStyle.Secondary)
       );
 
-      // Send the dashboard
+      // Send the dashboard with all 8 buttons
       await interaction.reply({
         embeds: [dashboardEmbed],
-        components: [row1, row2],
+        components: [row1, row2, row3],
         flags: MessageFlags.Ephemeral,
       });
     } catch (error) {
