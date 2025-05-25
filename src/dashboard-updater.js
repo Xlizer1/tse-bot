@@ -546,62 +546,55 @@ ContributionModel.getTopContributorsForTargets = async function (
   limit = 10
 ) {
   try {
-    // Validate and filter target IDs
+    // Validate inputs
     if (!targetIds || !Array.isArray(targetIds) || targetIds.length === 0) {
-      console.log("No target IDs provided for top contributors");
       return [];
     }
 
-    // Filter out invalid target IDs and ensure they're integers
+    // Filter and validate target IDs
     const validTargetIds = targetIds
       .filter((id) => id !== null && id !== undefined && !isNaN(id))
       .map((id) => parseInt(id))
-      .filter((id) => id > 0); // Ensure positive integers
+      .filter((id) => id > 0);
 
     if (validTargetIds.length === 0) {
-      console.log("No valid target IDs found for top contributors");
       return [];
     }
 
-    console.log(
-      `Getting top contributors for ${validTargetIds.length} targets:`,
-      validTargetIds
-    );
-
-    // Create placeholders for SQL IN clause
-    const placeholders = validTargetIds.map(() => "?").join(",");
-
-    // Ensure limit is a valid integer
     const validLimit = Math.max(1, Math.min(parseInt(limit) || 10, 100));
 
-    // Prepare parameters array
-    const parameters = [...validTargetIds, validLimit];
+    // Use a simpler approach that avoids the prepared statement issue
+    const userContributions = new Map();
 
-    console.log(
-      `SQL parameters count: ${parameters.length}, Placeholders: ${
-        validTargetIds.length + 1
-      }`
-    );
+    // Process each target ID individually to avoid the IN clause issue
+    for (const targetId of validTargetIds) {
+      const [contributions] = await pool.execute(
+        `SELECT user_id, username, amount FROM contributions WHERE target_id = ?`,
+        [targetId]
+      );
 
-    const [rows] = await pool.execute(
-      `SELECT c.user_id, c.username, SUM(c.amount) as total_amount
-       FROM contributions c
-       WHERE c.target_id IN (${placeholders})
-       GROUP BY c.user_id, c.username
-       ORDER BY total_amount DESC
-       LIMIT ?`,
-      parameters
-    );
+      contributions.forEach((contrib) => {
+        const userId = contrib.user_id;
+        if (!userContributions.has(userId)) {
+          userContributions.set(userId, {
+            user_id: userId,
+            username: contrib.username,
+            total_amount: 0,
+          });
+        }
+        userContributions.get(userId).total_amount += contrib.amount;
+      });
+    }
 
-    console.log(`Found ${rows.length} top contributors`);
-    return rows;
+    // Convert to array, sort by total, and limit results
+    const results = Array.from(userContributions.values())
+      .sort((a, b) => b.total_amount - a.total_amount)
+      .slice(0, validLimit);
+
+    return results;
   } catch (error) {
     console.error("Error getting top contributors for targets:", error);
-    console.error("Target IDs provided:", targetIds);
-    console.error("Limit provided:", limit);
-
-    // Return empty array instead of throwing to prevent dashboard crashes
-    return [];
+    return []; // Always return empty array on error to prevent crashes
   }
 };
 
